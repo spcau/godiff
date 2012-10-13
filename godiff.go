@@ -1249,7 +1249,7 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 		blank := lines1[0][0:0] // blank line
 		hashcode := compute_hash(blank)
 		ihash := int(hashcode) & (buckets - 1)
-		eqhash[ihash] = &EquivClass{ line_id: 0, line: blank, hash: hashcode }
+		eqhash[ihash] = &EquivClass{line_id: 0, line: blank, hash: hashcode}
 	}
 
 	// the unique id for identical lines, start with 1.
@@ -1277,7 +1277,7 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 			// not found in eqhash, create new entry
 			case eq == nil:
 				ids[i] = next_id
-				eqhash[ihash] = &EquivClass{ line_id : next_id, line : ll, hash : hashcode }
+				eqhash[ihash] = &EquivClass{line_id: next_id, line: ll, hash: hashcode}
 				next_id++
 
 			// found, and line is the same. reuse same id
@@ -1295,7 +1295,7 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 				}
 				// new entry, link to start of linked-list
 				if n == nil {
-					eq.next = &EquivClass{ line_id: next_id, line: ll, hash: hashcode, next: eq.next }
+					eq.next = &EquivClass{line_id: next_id, line: ll, hash: hashcode, next: eq.next}
 					ids[i] = next_id
 					next_id++
 				}
@@ -1324,7 +1324,7 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 	}
 
 	// find identical line only appear exactly once in both sets
-	len1, len2 :=  len(lines1.ids), len(lines2.ids)
+	len1, len2 := len(lines1.ids), len(lines2.ids)
 	once2 := make([]int, next_id)
 	for i, v := range lines2.ids {
 		if count1[v] == 1 && count2[v] == 1 {
@@ -1332,21 +1332,21 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 		}
 	}
 
-	for  i := 0; i < len1; {
+	for i := 0; i < len1; {
 		v := lines1.ids[i]
 		j := once2[v]
 		if j == 0 {
 			i++
 			continue
 		}
-		iend, jend := i + 1, j + 1
+		iend, jend := i+1, j+1
 		for iend < len1 && jend < len2 {
 			if once2[lines1.ids[iend]] != jend {
 				break
 			}
 			iend, jend = iend+1, jend+1
 		}
-//fmt.Fprintf(os.Stderr, "once: len=%d  %d <-> %d\n", iend - i, i, j)
+		//fmt.Fprintf(os.Stderr, "once: len=%d  %d <-> %d\n", iend - i, i, j)
 		i = iend
 	}
 
@@ -1445,7 +1445,7 @@ func expand_change_list(info1, info2 *LinesData, zchange1, zchange2 []bool) ([]b
 
 func open_file(fname string, finfo os.FileInfo) *Filedata {
 
-	file := &Filedata{ name: fname, info: finfo }
+	file := &Filedata{name: fname, info: finfo}
 
 	var err error
 

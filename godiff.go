@@ -1323,33 +1323,6 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 		count2[v]++
 	}
 
-	// find identical line only appear exactly once in both sets
-	len1, len2 := len(lines1.ids), len(lines2.ids)
-	once2 := make([]int, next_id)
-	for i, v := range lines2.ids {
-		if count1[v] == 1 && count2[v] == 1 {
-			once2[v] = i
-		}
-	}
-
-	for i := 0; i < len1; {
-		v := lines1.ids[i]
-		j := once2[v]
-		if j == 0 {
-			i++
-			continue
-		}
-		iend, jend := i+1, j+1
-		for iend < len1 && jend < len2 {
-			if once2[lines1.ids[iend]] != jend {
-				break
-			}
-			iend, jend = iend+1, jend+1
-		}
-		//fmt.Fprintf(os.Stderr, "once: len=%d  %d <-> %d\n", iend - i, i, j)
-		i = iend
-	}
-
 	// Go through all lines, replace chunk  lines that does not exists in the 
 	// other set with a single entry and a new id).
 	for f := 0; f < 2; f++ {
@@ -1364,6 +1337,7 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 		}
 
 		// new slices for compressed ids and the number of lines each entry replaced
+		// use a new negative id for those merged lines
 		zlines := make([]int, len(ids))
 		zids := make([]int, len(ids))
 
@@ -1398,10 +1372,6 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 			lines2.zids = zids
 			lines2.zlines = zlines
 		}
-
-		//	fmt.Fprintf(os.Stderr, "   ids=%v\n", ids)
-		//	fmt.Fprintf(os.Stderr, "  zids=%v\n", zids)
-		//	fmt.Fprintf(os.Stderr, "zlines=%v\n", zlines)
 	}
 
 }
@@ -1413,8 +1383,6 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 func expand_change_list(info1, info2 *LinesData, zchange1, zchange2 []bool) ([]bool, []bool) {
 	change1, change2 := make([]bool, len(info1.ids)), make([]bool, len(info2.ids))
 
-	//fmt.Fprintf(os.Stderr, "zchange1=%v\n", zchange1)
-	//fmt.Fprintf(os.Stderr, "zchange2=%v\n", zchange2)
 	for f := 0; f < 2; f++ {
 		var info *LinesData
 		var change, zchange []bool
@@ -1430,16 +1398,19 @@ func expand_change_list(info1, info2 *LinesData, zchange1, zchange2 []bool) ([]b
 		}
 
 		n := 0
+
+		// expand each entry by the number of lines in zlines[]
 		for i, m := range info.zlines {
-			b := zchange[i]
-			for j := 0; j < m; j, n = j+1, n+1 {
-				change[n] = b
+			if zchange[i] {
+				for j := 0; j < m; j, n = j+1, n+1 {
+					change[n] = true
+				}
+			} else {
+				n += m
 			}
 		}
 	}
 
-	//fmt.Fprintf(os.Stderr, "change1=%v\n", change1)
-	//fmt.Fprintf(os.Stderr, "change2=%v\n", change2)
 	return change1, change2
 }
 

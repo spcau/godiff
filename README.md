@@ -1,42 +1,22 @@
-godiff
-======
+#godiff
+A File/Directory diff-like comparision tool with HTML output.
 
-File/Directory diff tool with HTML output
-Copyright (C) 2012   Siu Pin Chao
+This program can be use to compare files and directories for differences.
+When comparing directories, it iterates through all files in both directories
+and compare files having the same name.
 
- This program is free software: you can redistribute it and/or modify
- it under the terms of the GNU General Public License as published by
- the Free Software Foundation, either version 3 of the License, or
- (at your option) any later version.
+##How to Use
+	godiff file1 file2 > results.html
+	godiff directory1 directory > results.html
 
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
+See `godiff -h` for all the available command line options
 
- You should have received a copy of the GNU General Public License
- along with this program.  If not, see <http://www.gnu.org/licenses/>.
+##Features
+* When comparing two directory, place all the differences into  a single html file.
+* Supports UTF8 file. 
+* Show differences within a line
+* Options for ignore case, white spaces compare, blank lines etc.
 
-Description:
- This program can be use to compare files and directories for differences.
- When comparing directories, it iterates through all files in both directories
- and compare files having the same name.
- 
- It uses the algorithm from "An O(ND) Difference Algorithm and its Variations" 
- by Eugene Myers Algorithmica Vol. 1 No. 2, 1986, p 251. 
-
-Main Features:
- * Supports UTF8 file. 
- * Show differences within a line
- * Options for ignore case, white spaces compare, blank lines etc.
-
-Main aim of the application is to try out the features in the go programming language. (golang.org)
- * Slices: Used extensively, and re-slicing too whenever it make sense.
- * File I/O: Use Mmap for reading text files
- * Function Closure: Use in callbacks functions to handle both file and line compare
- * Goroutines: for running multiple file compares concurrently, using channels and mutex too.
-
-How to Compile:
- Download and install go from golang.go. 
- Run the command "go build godiff.go" to build it
-
+##Go Language
+This program is created in the go language.
+Download go from [golang.org](http://golang.org)

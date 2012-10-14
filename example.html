@@ -1,0 +1,590 @@
+<!doctype html><html><head>
+<meta http-equiv="content-type" content="text/html;charset=utf-8"><title>Compare vim72/src/regexp.c vs vim73/src/regexp.c</title>
+<style type="text/css">
+.tab {border-color:#808080; border-style:solid; border-width:1px 1px 1px 1px; border-collapse:collapse;}
+.tth {border-color:#808080; border-style:solid; border-width:1px 1px 1px 1px; border-collapse:collapse; padding:4px; vertical-align:top; text-align:left; background-color:#E0E0E0;}
+.ttd {border-color:#808080; border-style:solid; border-width:1px 1px 1px 1px; border-collapse:collapse; padding:4px; vertical-align:top; text-align:left;}
+.hdr {color:black; font-size:85%;}
+.inf {color:#C08000; font-size:85%;}
+.err {color:red; font-size:85%; font-style:bold; margin:0; display:block;}
+.msg {color:#508050; font-size:85%; font-style:bold; margin:0; display:block;}
+.lin {color:#C08000; font-size:75%; font-style:italic; margin:0; display:block;}
+.nop {color:black; font-size:75%; font-family:monospace; white-space:pre; margin:0; display:block;}
+.upd {color:black; font-size:75%; font-family:monospace; white-space:pre; margin:0; background-color:#CFCFFF; display:block;}
+.chg {color:#C00080;}
+.add {color:black; font-size:75%; font-family:monospace; white-space:pre; margin:0; background-color:#CFFFCF; display:block;}
+.del {color:black; font-size:75%; font-family:monospace; white-space:pre; margin:0; background-color:#FFCFCF; display:block;}
+</style></head><body>
+<h1>Compare vim72/src/regexp.c vs vim73/src/regexp.c</h1><br>
+<table class="tab">
+<tr><td class="tth"><span class="hdr">vim72/src/regexp.c</span><br><span class="inf">173620 Fri, 08 Aug 2008 05:58:50 EST</span></td><td class="tth"><span class="hdr">vim73/src/regexp.c</span><br><span class="inf">176566 Tue, 13 Jul 2010 06:41:48 EST</span></td></tr><tr><td class="ttd"><span class="lin">Line 471 to 477</span><span class="nop">
+    if ((*pp)[1] == &apos;:&apos;)
+    {
+</span><span class="upd">	for (i = 0; i &lt; sizeof(class_names) / sizeof(*class_names); ++i)
+</span><span class="nop">	    if (STRNCMP(*pp + 2, class_names[i], STRLEN(class_names[i])) == 0)
+	    {
+		*pp += STRLEN(class_names[i]) + 2;
+</span></td><td class="ttd"><span class="lin">Line 471 to 477</span><span class="nop">
+    if ((*pp)[1] == &apos;:&apos;)
+    {
+</span><span class="upd">	for (i = 0; i &lt; <span class="chg">(int)(</span>sizeof(class_names) / sizeof(*class_names)<span class="chg">)</span>; ++i)
+</span><span class="nop">	    if (STRNCMP(*pp + 2, class_names[i], STRLEN(class_names[i])) == 0)
+	    {
+		*pp += STRLEN(class_names[i]) + 2;
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 583 to 588</span><span class="nop">#endif
+static char_u	*regcode;	/* Code-emit pointer, or JUST_CALC_SIZE */
+static long	regsize;	/* Code size. */
+</span><span class="nop">static char_u	had_endbrace[NSUBEXP];	/* flags, TRUE if end of () found */
+static unsigned	regflags;	/* RF_ flags for prog */
+static long	brace_min[10];	/* Minimums for complex brace repeats */
+</span></td><td class="ttd"><span class="lin">Line 583 to 589</span><span class="nop">#endif
+static char_u	*regcode;	/* Code-emit pointer, or JUST_CALC_SIZE */
+static long	regsize;	/* Code size. */
+</span><span class="add">static int	reg_toolong;	/* TRUE when offset out of range */
+</span><span class="nop">static char_u	had_endbrace[NSUBEXP];	/* flags, TRUE if end of () found */
+static unsigned	regflags;	/* RF_ flags for prog */
+static long	brace_min[10];	/* Minimums for complex brace repeats */
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 729 to 734</span><span class="nop">    }
+    return 0;
+}
+</span><span class="nop">
+/*
+ * Produce the bytes for equivalence class &quot;c&quot;.
+</span></td><td class="ttd"><span class="lin">Line 730 to 759</span><span class="nop">    }
+    return 0;
+}
+</span><span class="add">
+#ifdef EBCDIC
+/*
+ * Table for equivalence class &quot;c&quot;. (IBM-1047)
+ */
+char *EQUIVAL_CLASS_C[16] = {
+    &quot;A\x62\x63\x64\x65\x66\x67&quot;,
+    &quot;C\x68&quot;,
+    &quot;E\x71\x72\x73\x74&quot;,
+    &quot;I\x75\x76\x77\x78&quot;,
+    &quot;N\x69&quot;,
+    &quot;O\xEB\xEC\xED\xEE\xEF&quot;,
+    &quot;U\xFB\xFC\xFD\xFE&quot;,
+    &quot;Y\xBA&quot;,
+    &quot;a\x42\x43\x44\x45\x46\x47&quot;,
+    &quot;c\x48&quot;,
+    &quot;e\x51\x52\x53\x54&quot;,
+    &quot;i\x55\x56\x57\x58&quot;,
+    &quot;n\x49&quot;,
+    &quot;o\xCB\xCC\xCD\xCE\xCF&quot;,
+    &quot;u\xDB\xDC\xDD\xDE&quot;,
+    &quot;y\x8D\xDF&quot;,
+};
+#endif
+</span><span class="nop">
+/*
+ * Produce the bytes for equivalence class &quot;c&quot;.
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 743 to 748</span><span class="nop">					 || STRCMP(p_enc, &quot;iso-8859-15&quot;) == 0)
+#endif
+    {
+</span><span class="nop">	switch (c)
+	{
+	    case &apos;A&apos;: case &apos;\300&apos;: case &apos;\301&apos;: case &apos;\302&apos;:
+</span></td><td class="ttd"><span class="lin">Line 768 to 789</span><span class="nop">					 || STRCMP(p_enc, &quot;iso-8859-15&quot;) == 0)
+#endif
+    {
+</span><span class="add">#ifdef EBCDIC
+	int i;
+
+	/* This might be slower than switch/case below. */
+	for (i = 0; i &lt; 16; i++)
+	{
+	    if (vim_strchr(EQUIVAL_CLASS_C[i], c) != NULL)
+	    {
+		char *p = EQUIVAL_CLASS_C[i];
+
+		while (*p != 0)
+		    regmbc(*p++);
+		return;
+	    }
+	}
+#else
+</span><span class="nop">	switch (c)
+	{
+	    case &apos;A&apos;: case &apos;\300&apos;: case &apos;\301&apos;: case &apos;\302&apos;:
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 810 to 815</span><span class="nop">		      regmbc(&apos;y&apos;); regmbc(&apos;\375&apos;); regmbc(&apos;\377&apos;);
+		      return;
+	}
+</span><span class="nop">    }
+    regmbc(c);
+}
+</span></td><td class="ttd"><span class="lin">Line 851 to 857</span><span class="nop">		      regmbc(&apos;y&apos;); regmbc(&apos;\375&apos;); regmbc(&apos;\377&apos;);
+		      return;
+	}
+</span><span class="add">#endif
+</span><span class="nop">    }
+    regmbc(c);
+}
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 1028 to 1036</span><span class="nop">    regcomp_start(expr, re_flags);
+    regcode = r-&gt;program;
+    regc(REGMAGIC);
+</span><span class="upd">    if (reg(REG_NOPAREN, &amp;flags) == NULL)
+</span><span class="nop">    {
+	vim_free(r);
+</span><span class="nop">	return NULL;
+    }
+
+</span></td><td class="ttd"><span class="lin">Line 1070 to 1080</span><span class="nop">    regcomp_start(expr, re_flags);
+    regcode = r-&gt;program;
+    regc(REGMAGIC);
+</span><span class="upd">    if (reg(REG_NOPAREN, &amp;flags) == NULL<span class="chg"> || reg_toolong</span>)
+</span><span class="nop">    {
+	vim_free(r);
+</span><span class="add">	if (reg_toolong)
+	    EMSG_RET_NULL(_(&quot;E339: Pattern too long&quot;));
+</span><span class="nop">	return NULL;
+    }
+
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 1141 to 1146</span><span class="nop">    re_has_z = 0;
+#endif
+    regsize = 0L;
+</span><span class="nop">    regflags = 0;
+#if defined(FEAT_SYN_HL) || defined(PROTO)
+    had_eol = FALSE;
+</span></td><td class="ttd"><span class="lin">Line 1185 to 1191</span><span class="nop">    re_has_z = 0;
+#endif
+    regsize = 0L;
+</span><span class="add">    reg_toolong = FALSE;
+</span><span class="nop">    regflags = 0;
+#if defined(FEAT_SYN_HL) || defined(PROTO)
+    had_eol = FALSE;
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 1228 to 1234</span><span class="nop">    {
+	skipchr();
+	br = regbranch(&amp;flags);
+</span><span class="upd">	if (br == NULL)
+</span><span class="nop">	    return NULL;
+	regtail(ret, br);	/* BRANCH -&gt; BRANCH. */
+	if (!(flags &amp; HASWIDTH))
+</span></td><td class="ttd"><span class="lin">Line 1273 to 1279</span><span class="nop">    {
+	skipchr();
+	br = regbranch(&amp;flags);
+</span><span class="upd">	if (br == NULL<span class="chg"> || reg_toolong</span>)
+</span><span class="nop">	    return NULL;
+	regtail(ret, br);	/* BRANCH -&gt; BRANCH. */
+	if (!(flags &amp; HASWIDTH))
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 1313 to 1318</span><span class="nop">	    break;
+	skipchr();
+	regtail(latest, regnode(END)); /* operand ends */
+</span><span class="nop">	reginsert(MATCH, latest);
+	chain = latest;
+    }
+</span></td><td class="ttd"><span class="lin">Line 1358 to 1365</span><span class="nop">	    break;
+	skipchr();
+	regtail(latest, regnode(END)); /* operand ends */
+</span><span class="add">	if (reg_toolong)
+	    break;
+</span><span class="nop">	reginsert(MATCH, latest);
+	chain = latest;
+    }
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 1382 to 1388</span><span class="nop">			    break;
+	    default:
+			    latest = regpiece(&amp;flags);
+</span><span class="upd">			    if (latest == NULL)
+</span><span class="nop">				return NULL;
+			    *flagp |= flags &amp; (HASWIDTH | HASNL | HASLOOKBH);
+			    if (chain == NULL)	/* First piece. */
+</span></td><td class="ttd"><span class="lin">Line 1429 to 1435</span><span class="nop">			    break;
+	    default:
+			    latest = regpiece(&amp;flags);
+</span><span class="upd">			    if (latest == NULL<span class="chg"> || reg_toolong</span>)
+</span><span class="nop">				return NULL;
+			    *flagp |= flags &amp; (HASWIDTH | HASNL | HASLOOKBH);
+			    if (chain == NULL)	/* First piece. */
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 2540 to 2547</span><span class="nop">	offset = (int)(scan - val);
+    else
+	offset = (int)(val - scan);
+</span><span class="upd">    *<span class="chg">(</span>s<span class="chg">c</span>an <span class="chg">+</span> <span class="chg">1)</span> <span class="chg">=</span> <span class="chg">(</span>c<span class="chg">h</span>a<span class="chg">r_u)</span> <span class="chg">(((u</span>n<span class="chg">si</span>g<span class="chg">n</span>e<span class="chg">d)o</span>f<span class="chg">fse</span>t <span class="chg">&gt;&gt;</span> <span class="chg">8)</span> <span class="chg">&amp; 0377);</span>
+    *<span class="chg">(</span>s<span class="chg">c</span>a<span class="chg">n</span> <span class="chg">+</span> <span class="chg">2)</span> <span class="chg">=</span> <span class="chg">(c</span>ha<span class="chg">r_u)</span> <span class="chg">(</span>o<span class="chg">ffs</span>et<span class="chg"> &amp; 0377);</span>
+</span><span class="nop">}
+
+/*
+</span></td><td class="ttd"><span class="lin">Line 2587 to 2602</span><span class="nop">	offset = (int)(scan - val);
+    else
+	offset = (int)(val - scan);
+</span><span class="upd">    <span class="chg">/</span>*<span class="chg"> When the offset use</span>s<span class="chg"> more th</span>an <span class="chg">16</span> <span class="chg">bits</span> <span class="chg">it</span> ca<span class="chg">n no</span> <span class="chg">lo</span>nge<span class="chg">r </span>f<span class="chg">i</span>t <span class="chg">in</span> <span class="chg">the</span> <span class="chg">two</span>
+<span class="chg"> </span>    *<span class="chg"> bytes avaliable.  U</span>s<span class="chg">e a glob</span>a<span class="chg">l</span> <span class="chg">flag</span> <span class="chg">to</span> <span class="chg">avoid</span> ha<span class="chg">ving</span> <span class="chg">t</span>o<span class="chg"> check r</span>et<span class="chg">urn</span>
+</span><span class="add">     * values in too many places. */
+    if (offset &gt; 0xffff)
+	reg_toolong = TRUE;
+    else
+    {
+	*(scan + 1) = (char_u) (((unsigned)offset &gt;&gt; 8) &amp; 0377);
+	*(scan + 2) = (char_u) (offset &amp; 0377);
+    }
+</span><span class="nop">}
+
+/*
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 3362 to 3373</span><span class="nop"> * Match a regexp against a string (&quot;line&quot; points to the string) or multiple
+ * lines (&quot;line&quot; is NULL, use reg_getline()).
+ */
+</span><span class="del">/*ARGSUSED*/
+</span><span class="nop">    static long
+vim_regexec_both(line, col, tm)
+    char_u	*line;
+</span><span class="nop">    colnr_T	col;		/* column to start looking for match */
+</span><span class="upd">    proftime_T	*tm;	<span class="chg">	</span>/* timeout limit or NULL */
+</span><span class="nop">{
+    regprog_T	*prog;
+    char_u	*s;
+</span></td><td class="ttd"><span class="lin">Line 3417 to 3427</span><span class="nop"> * Match a regexp against a string (&quot;line&quot; points to the string) or multiple
+ * lines (&quot;line&quot; is NULL, use reg_getline()).
+ */
+</span><span class="nop">    static long
+vim_regexec_both(line, col, tm)
+    char_u	*line;
+</span><span class="nop">    colnr_T	col;		/* column to start looking for match */
+</span><span class="upd">    proftime_T	*tm<span class="chg"> UNUSED</span>;	/* timeout limit or NULL */
+</span><span class="nop">{
+    regprog_T	*prog;
+    char_u	*s;
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 4532 to 4538</span><span class="nop">		cleanup_subexpr();
+		if (!REG_MULTI)		/* Single-line regexp */
+		{
+</span><span class="upd">		    if (reg_endp[no] == NULL)
+</span><span class="nop">		    {
+			/* Backref was not set: Match an empty string. */
+			len = 0;
+</span></td><td class="ttd"><span class="lin">Line 4586 to 4592</span><span class="nop">		cleanup_subexpr();
+		if (!REG_MULTI)		/* Single-line regexp */
+		{
+</span><span class="upd">		    if (<span class="chg">reg_startp[no] == NULL || </span>reg_endp[no] == NULL)
+</span><span class="nop">		    {
+			/* Backref was not set: Match an empty string. */
+			len = 0;
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 4548 to 4554</span><span class="nop">		}
+		else				/* Multi-line regexp */
+		{
+</span><span class="upd">		    if (reg_endpos[no].lnum &lt; 0)
+</span><span class="nop">		    {
+			/* Backref was not set: Match an empty string. */
+			len = 0;
+</span></td><td class="ttd"><span class="lin">Line 4602 to 4608</span><span class="nop">		}
+		else				/* Multi-line regexp */
+		{
+</span><span class="upd">		    if (<span class="chg">reg_startpos[no].lnum &lt; 0 || </span>reg_endpos[no].lnum &lt; 0)
+</span><span class="nop">		    {
+			/* Backref was not set: Match an empty string. */
+			len = 0;
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 5765 to 5770</span><span class="nop">
+/*
+ * regnext - dig the &quot;next&quot; pointer out of a node
+</span><span class="nop"> */
+    static char_u *
+regnext(p)
+</span></td><td class="ttd"><span class="lin">Line 5819 to 5826</span><span class="nop">
+/*
+ * regnext - dig the &quot;next&quot; pointer out of a node
+</span><span class="add"> * Returns NULL when calculating size, when there is no next item and when
+ * there is an error.
+</span><span class="nop"> */
+    static char_u *
+regnext(p)
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 5772 to 5778</span><span class="nop">{
+    int	    offset;
+
+</span><span class="upd">    if (p == JUST_CALC_SIZE)
+</span><span class="nop">	return NULL;
+
+    offset = NEXT(p);
+</span></td><td class="ttd"><span class="lin">Line 5828 to 5834</span><span class="nop">{
+    int	    offset;
+
+</span><span class="upd">    if (p == JUST_CALC_SIZE<span class="chg"> || reg_toolong</span>)
+</span><span class="nop">	return NULL;
+
+    offset = NEXT(p);
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 6813 to 6818</span><span class="nop"> * that contains a call to substitute() and submatch(). */
+static regmatch_T	*submatch_match;
+static regmmatch_T	*submatch_mmatch;
+</span><span class="nop">#endif
+
+#if defined(FEAT_MODIFY_FNAME) || defined(FEAT_EVAL) || defined(PROTO)
+</span></td><td class="ttd"><span class="lin">Line 6869 to 6876</span><span class="nop"> * that contains a call to substitute() and submatch(). */
+static regmatch_T	*submatch_match;
+static regmmatch_T	*submatch_mmatch;
+</span><span class="add">static linenr_T		submatch_firstlnum;
+static linenr_T		submatch_maxline;
+</span><span class="nop">#endif
+
+#if defined(FEAT_MODIFY_FNAME) || defined(FEAT_EVAL) || defined(PROTO)
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 6926 to 6932</span><span class="nop">	}
+	else
+	{
+</span><span class="del">	    linenr_T	save_reg_maxline;
+</span><span class="nop">	    win_T	*save_reg_win;
+	    int		save_ireg_ic;
+
+</span></td><td class="ttd"><span class="lin">Line 6984 to 6989</span><span class="nop">	}
+	else
+	{
+</span><span class="nop">	    win_T	*save_reg_win;
+	    int		save_ireg_ic;
+
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 6938 to 6944</span><span class="nop">	     * vim_regexec_multi() can&apos;t be called recursively. */
+	    submatch_match = reg_match;
+	    submatch_mmatch = reg_mmatch;
+</span><span class="upd">	    sa<span class="chg">ve</span>_r<span class="chg">eg_max</span>l<span class="chg">i</span>n<span class="chg">e</span> = reg_<span class="chg">max</span>l<span class="chg">i</span>n<span class="chg">e</span>;
+</span><span class="nop">	    save_reg_win = reg_win;
+	    save_ireg_ic = ireg_ic;
+	    can_f_submatch = TRUE;
+</span></td><td class="ttd"><span class="lin">Line 6995 to 7002</span><span class="nop">	     * vim_regexec_multi() can&apos;t be called recursively. */
+	    submatch_match = reg_match;
+	    submatch_mmatch = reg_mmatch;
+</span><span class="upd">	    s<span class="chg">ubm</span>a<span class="chg">tch</span>_<span class="chg">fi</span>r<span class="chg">st</span>ln<span class="chg">um</span> = reg_<span class="chg">first</span>ln<span class="chg">um</span>;
+</span><span class="add">	    submatch_maxline = reg_maxline;
+</span><span class="nop">	    save_reg_win = reg_win;
+	    save_ireg_ic = ireg_ic;
+	    can_f_submatch = TRUE;
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 6946 to 6951</span><span class="nop">	    eval_result = eval_to_string(source + 2, NULL, TRUE);
+	    if (eval_result != NULL)
+	    {
+</span><span class="nop">		for (s = eval_result; *s != NUL; mb_ptr_adv(s))
+		{
+		    /* Change NL to CR, so that it becomes a line break.
+</span></td><td class="ttd"><span class="lin">Line 7004 to 7011</span><span class="nop">	    eval_result = eval_to_string(source + 2, NULL, TRUE);
+	    if (eval_result != NULL)
+	    {
+</span><span class="add">		int had_backslash = FALSE;
+
+</span><span class="nop">		for (s = eval_result; *s != NUL; mb_ptr_adv(s))
+		{
+		    /* Change NL to CR, so that it becomes a line break.
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 6953 to 6959</span><span class="nop">		    if (*s == NL)
+			*s = CAR;
+		    else if (*s == &apos;\\&apos; &amp;&amp; s[1] != NUL)
+</span><span class="nop">			++s;
+</span><span class="nop">		}
+
+		dst += STRLEN(eval_result);
+</span></td><td class="ttd"><span class="lin">Line 7013 to 7039</span><span class="nop">		    if (*s == NL)
+			*s = CAR;
+		    else if (*s == &apos;\\&apos; &amp;&amp; s[1] != NUL)
+</span><span class="add">		    {
+</span><span class="nop">			++s;
+</span><span class="add">			/* Change NL to CR here too, so that this works:
+			 * :s/abc\\\ndef/\=&quot;aaa\\\nbbb&quot;/  on text:
+			 *   abc\
+			 *   def
+			 */
+			if (*s == NL)
+			    *s = CAR;
+			had_backslash = TRUE;
+		    }
+		}
+		if (had_backslash &amp;&amp; backslash)
+		{
+		    /* Backslashes will be consumed, need to double them. */
+		    s = vim_strsave_escaped(eval_result, (char_u *)&quot;\\&quot;);
+		    if (s != NULL)
+		    {
+			vim_free(eval_result);
+			eval_result = s;
+		    }
+</span><span class="nop">		}
+
+		dst += STRLEN(eval_result);
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 6961 to 6967</span><span class="nop">
+	    reg_match = submatch_match;
+	    reg_mmatch = submatch_mmatch;
+</span><span class="upd">	    reg_<span class="chg">max</span>l<span class="chg">i</span>n<span class="chg">e</span> = sa<span class="chg">ve</span>_r<span class="chg">eg_max</span>l<span class="chg">i</span>n<span class="chg">e</span>;
+</span><span class="nop">	    reg_win = save_reg_win;
+	    ireg_ic = save_ireg_ic;
+	    can_f_submatch = FALSE;
+</span></td><td class="ttd"><span class="lin">Line 7041 to 7048</span><span class="nop">
+	    reg_match = submatch_match;
+	    reg_mmatch = submatch_mmatch;
+</span><span class="upd">	    reg_<span class="chg">first</span>ln<span class="chg">um</span> = s<span class="chg">ubm</span>a<span class="chg">tch</span>_<span class="chg">fi</span>r<span class="chg">st</span>ln<span class="chg">um</span>;
+</span><span class="add">	    reg_maxline = submatch_maxline;
+</span><span class="nop">	    reg_win = save_reg_win;
+	    ireg_ic = save_ireg_ic;
+	    can_f_submatch = FALSE;
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 7059 to 7068</span><span class="nop">#ifdef FEAT_MBYTE
+	    if (has_mbyte)
+	    {
+</span><span class="upd">		<span class="chg">src</span> <span class="chg">+</span>= mb_ptr2len(src - 1)<span class="chg"> - 1</span>;
+</span><span class="nop">		if (copy)
+		    mb_char2bytes(cc, dst);
+		dst += mb_char2len(cc) - 1;
+</span><span class="nop">	    }
+	    else
+#endif
+</span></td><td class="ttd"><span class="lin">Line 7140 to 7165</span><span class="nop">#ifdef FEAT_MBYTE
+	    if (has_mbyte)
+	    {
+</span><span class="upd">		<span class="chg">int totlen</span> = mb_ptr2len(src - 1);
+</span><span class="add">
+</span><span class="nop">		if (copy)
+		    mb_char2bytes(cc, dst);
+		dst += mb_char2len(cc) - 1;
+</span><span class="add">		if (enc_utf8)
+		{
+		    int clen = utf_ptr2len(src - 1);
+
+		    /* If the character length is shorter than &quot;totlen&quot;, there
+		     * are composing characters; copy them as-is. */
+		    if (clen &lt; totlen)
+		    {
+			if (copy)
+			    mch_memmove(dst + 1, src - 1 + clen,
+						     (size_t)(totlen - clen));
+			dst += totlen - clen;
+		    }
+		}
+		src += totlen - 1;
+</span><span class="nop">	    }
+	    else
+#endif
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 7196 to 7201</span><span class="nop">}
+
+#ifdef FEAT_EVAL
+</span><span class="nop">/*
+ * Used for the submatch() function: get the string from the n&apos;th submatch in
+ * allocated memory.
+</span></td><td class="ttd"><span class="lin">Line 7293 to 7323</span><span class="nop">}
+
+#ifdef FEAT_EVAL
+</span><span class="add">static char_u *reg_getline_submatch __ARGS((linenr_T lnum));
+
+/*
+ * Call reg_getline() with the line numbers from the submatch.  If a
+ * substitute() was used the reg_maxline and other values have been
+ * overwritten.
+ */
+    static char_u *
+reg_getline_submatch(lnum)
+    linenr_T	lnum;
+{
+    char_u *s;
+    linenr_T save_first = reg_firstlnum;
+    linenr_T save_max = reg_maxline;
+
+    reg_firstlnum = submatch_firstlnum;
+    reg_maxline = submatch_maxline;
+
+    s = reg_getline(lnum);
+
+    reg_firstlnum = save_first;
+    reg_maxline = save_max;
+    return s;
+}
+
+</span><span class="nop">/*
+ * Used for the submatch() function: get the string from the n&apos;th submatch in
+ * allocated memory.
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 7226 to 7232</span><span class="nop">	    if (lnum &lt; 0 || submatch_mmatch-&gt;endpos[no].lnum &lt; 0)
+		return NULL;
+
+</span><span class="upd">	    s = reg_getline(lnum) + submatch_mmatch-&gt;startpos[no].col;
+</span><span class="nop">	    if (s == NULL)  /* anti-crash check, cannot happen? */
+		break;
+	    if (submatch_mmatch-&gt;endpos[no].lnum == lnum)
+</span></td><td class="ttd"><span class="lin">Line 7348 to 7354</span><span class="nop">	    if (lnum &lt; 0 || submatch_mmatch-&gt;endpos[no].lnum &lt; 0)
+		return NULL;
+
+</span><span class="upd">	    s = reg_getline<span class="chg">_submatch</span>(lnum) + submatch_mmatch-&gt;startpos[no].col;
+</span><span class="nop">	    if (s == NULL)  /* anti-crash check, cannot happen? */
+		break;
+	    if (submatch_mmatch-&gt;endpos[no].lnum == lnum)
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 7252 to 7258</span><span class="nop">		++lnum;
+		while (lnum &lt; submatch_mmatch-&gt;endpos[no].lnum)
+		{
+</span><span class="upd">		    s = reg_getline(lnum++);
+</span><span class="nop">		    if (round == 2)
+			STRCPY(retval + len, s);
+		    len += (int)STRLEN(s);
+</span></td><td class="ttd"><span class="lin">Line 7374 to 7380</span><span class="nop">		++lnum;
+		while (lnum &lt; submatch_mmatch-&gt;endpos[no].lnum)
+		{
+</span><span class="upd">		    s = reg_getline<span class="chg">_submatch</span>(lnum++);
+</span><span class="nop">		    if (round == 2)
+			STRCPY(retval + len, s);
+		    len += (int)STRLEN(s);
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 7261 to 7267</span><span class="nop">		    ++len;
+		}
+		if (round == 2)
+</span><span class="upd">		    STRNCPY(retval + len, reg_getline(lnum),
+</span><span class="nop">					     submatch_mmatch-&gt;endpos[no].col);
+		len += submatch_mmatch-&gt;endpos[no].col;
+		if (round == 2)
+</span></td><td class="ttd"><span class="lin">Line 7383 to 7389</span><span class="nop">		    ++len;
+		}
+		if (round == 2)
+</span><span class="upd">		    STRNCPY(retval + len, reg_getline<span class="chg">_submatch</span>(lnum),
+</span><span class="nop">					     submatch_mmatch-&gt;endpos[no].col);
+		len += submatch_mmatch-&gt;endpos[no].col;
+		if (round == 2)
+</span></td></tr>
+<tr><td class="ttd"><span class="lin">Line 7279 to 7291</span><span class="nop">    }
+    else
+    {
+</span><span class="upd">	<span class="chg">if</span> <span class="chg">(</span>submatch_match-&gt;<span class="chg">end</span>p[no]<span class="chg"> == NULL)</span>
+</span><span class="nop">	    retval = NULL;
+	else
+</span><span class="del">	{
+	    s = submatch_match-&gt;startp[no];
+</span><span class="nop">	    retval = vim_strnsave(s, (int)(submatch_match-&gt;endp[no] - s));
+</span><span class="del">	}
+</span><span class="nop">    }
+
+    return retval;
+</span></td><td class="ttd"><span class="lin">Line 7401 to 7411</span><span class="nop">    }
+    else
+    {
+</span><span class="upd">	<span class="chg">s =</span> submatch_match-&gt;<span class="chg">start</span>p[no]<span class="chg">;</span>
+</span><span class="add">	if (s == NULL || submatch_match-&gt;endp[no] == NULL)
+</span><span class="nop">	    retval = NULL;
+	else
+</span><span class="nop">	    retval = vim_strnsave(s, (int)(submatch_match-&gt;endp[no] - s));
+</span><span class="nop">    }
+
+    return retval;
+</span></td></tr>
+</table><br>
+Generated on Sun, 14 Oct 2012 17:37:42 EST<br><br><b>Legend:</b><br><table class="tab">
+<tr><td class="tth"><span class="hdr">filename 1</span></td><td class="tth"><span class="hdr">filename 2</span></td></tr>
+<tr><td class="ttd">
+<span class="lin">Line N</span>
+<span class="del">  line deleted</span>
+<span class="nop">  no change</span>
+<span class="upd">  line modified</span>
+</td>
+<td class="ttd">
+<span class="lin">Line M</span>
+<span class="add">  line added</span>
+<span class="nop">  no change</span>
+<span class="upd">  <span class="chg">L</span>ine <span class="chg">M</span>odified</span>
+</td></tr>
+</table>
+</body></html>

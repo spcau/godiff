@@ -5,6 +5,8 @@ This program can be use to compare files and directories for differences.
 When comparing directories, it iterates through all files in both directories
 and compare files having the same name.
 
+See [example](example.html) output.
+
 ##How to Use
 	godiff file1 file2 > results.html
 	godiff directory1 directory > results.html

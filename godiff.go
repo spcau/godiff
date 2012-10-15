@@ -34,9 +34,6 @@
 //  * Function Closure: Use in callbacks functions to handle both file and line compare
 //  * Goroutines: for running multiple file compares concurrently, using channels and mutex too.
 //
-// How to Compile:
-//  Download and install go from golang.go. 
-//  Run the command "go build godiff.go" to build it
 //
 //  History
 //  -------
@@ -110,14 +107,18 @@ type OutputFormat struct {
 	header_printed         bool
 }
 
-// Messages
-const MSG_FILE_SIZE_ZERO = "File has size 0"
-const MSG_FILE_NOT_EXISTS = "File does not exist"
-const MSG_DIR_NOT_EXISTS = "Directory does not exist"
-const MSG_FILE_IS_BINARY = "This is a binary file"
-const MSG_BIN_FILE_DIFFERS = "Binary file differs"
-const MSG_FILE_IDENTICAL = "Files are the same"
-const MSG_FILE_TOO_BIG = "File too big"
+// Error Messages
+const (
+	MSG_FILE_SIZE_ZERO   = "File has size 0"
+	MSG_FILE_NOT_EXISTS  = "File does not exist"
+	MSG_DIR_NOT_EXISTS   = "Directory does not exist"
+	MSG_FILE_IS_BINARY   = "This is a binary file"
+	MSG_BIN_FILE_DIFFERS = "Binary file differs"
+	MSG_FILE_IDENTICAL   = "Files are the same"
+	MSG_FILE_TOO_BIG     = "File too big"
+	MSG_THIS_IS_DIR      = "This is a directory"
+	MSG_THIS_IS_FILE     = "This is a file"
+)
 
 const HTML_HEADER = `<!doctype html><html><head>
 <meta http-equiv="content-type" content="text/html;charset=utf-8">`
@@ -333,12 +334,8 @@ func do_diff(data1, data2 []int) ([]bool, []bool) {
 	v := make([]int, size*2)
 
 	// Run diff compare algorithm.
-	changed := algorithm_lcs(data1, data2, change1, change2, v)
+	algorithm_lcs(data1, data2, change1, change2, v)
 
-	// No change, return nil
-	if !changed {
-		change1, change2 = nil, nil
-	}
 	return change1, change2
 }
 
@@ -346,9 +343,10 @@ func do_diff(data1, data2 []int) ([]bool, []bool) {
 // Report diff changes.
 // For each type of change, call the corresponding 'action' function
 //
-func report_changes(action *DiffAction, data1, data2 []int, change1, change2 []bool) {
+func report_changes(action *DiffAction, data1, data2 []int, change1, change2 []bool) bool {
 	len1, len2 := len(change1), len(change2)
 	i1, i2 := 0, 0
+	changed := false
 
 	// scan for changes
 	for i1 < len1 || i2 < len2 {
@@ -379,10 +377,13 @@ func report_changes(action *DiffAction, data1, data2 []int, change1, change2 []b
 			}
 			if i1 < s1 && i2 < s2 {
 				action.diff_modify(i1, s1, i2, s2)
+				changed = true
 			} else if i1 < s1 {
 				action.diff_remove(i1, s1, i2, i2)
+				changed = true
 			} else if i2 < s2 {
 				action.diff_insert(i1, i1, i2, s2)
+				changed = true
 			}
 			i1, i2 = s1, s2
 
@@ -396,6 +397,7 @@ func report_changes(action *DiffAction, data1, data2 []int, change1, change2 []b
 			}
 			if i1 < s1 {
 				action.diff_remove(i1, s1, i2, i2)
+				changed = true
 			}
 			i1 = s1
 
@@ -409,15 +411,18 @@ func report_changes(action *DiffAction, data1, data2 []int, change1, change2 []b
 			}
 			if i2 < s2 {
 				action.diff_insert(i1, i1, i2, s2)
+				changed = true
 			}
 			i2 = s2
 
 		default: // should not reach here
-			os.Exit(4)
+			return true
 		}
 	}
+	return changed
 }
 
+// convert byte to lower case
 func to_lower_byte(b byte) byte {
 	if b >= 'A' && b <= 'Z' {
 		return b - 'A' + 'a'
@@ -428,14 +433,15 @@ func to_lower_byte(b byte) byte {
 // split text into array of individual rune, and another array for comparison.
 func split_runes(s []byte) ([]rune, []int) {
 
-	data := make([]rune, len(s))
-	cmp := make([]int, len(s))
+	lens := len(s)
+	data := make([]rune, lens)
+	cmp := make([]int, lens)
 
 	i, n := 0, 0
 	var r rune
 	var h int
 
-	for i < len(s) {
+	for i < lens {
 		if s[i] < utf8.RuneSelf {
 			r = rune(s[i])
 			if flag_cmp_ignore_case {
@@ -498,8 +504,9 @@ func write_html_bytes(buf *bytes.Buffer, line []byte) {
 
 	i := 0
 	lasti := 0
+	llen := len(line)
 
-	for i < len(line) {
+	for i < llen {
 		v = rune(line[i])
 		if v < utf8.RuneSelf {
 			size = 1
@@ -1221,9 +1228,12 @@ type EquivClass struct {
 }
 
 type LinesData struct {
-	ids    []int // Id's for each line, 
-	zids   []int // list of ids with unmatched lines replaced by a single entry (and blank lines removed)
-	zlines []int // Number of lines that represent each zids entry
+	ids        []int // Id's for each line, 
+	zids       []int // list of ids with unmatched lines replaced by a single entry (and blank lines removed)
+	zlines     []int // Number of lines that represent each zids entry
+	change     []bool
+	zids_start int
+	zids_end   int
 }
 
 //
@@ -1234,6 +1244,7 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 	len1, len2 := len(lines1), len(lines2)
 	info1, info2 := LinesData{}, LinesData{}
 	info1.ids, info2.ids = make([]int, len1), make([]int, len2)
+	info1.change, info2.change = make([]bool, len1), make([]bool, len2)
 
 	// since we already have a hashing function, it's faster to use arrays than to use go's builtin map
 	// Use bucket size that is power of 2
@@ -1313,6 +1324,7 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 // Return compressed lists of ids and a list indicating where are the chunk of lines being replaced
 func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 
+	len1, len2 := len(lines1.ids), len(lines2.ids)
 	count1, count2 := make([]int, next_id), make([]int, next_id)
 
 	// count the number of occurrances of each id's
@@ -1323,16 +1335,58 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 		count2[v]++
 	}
 
+	// exclude lines from the begining that are identical in both files
+	i1, i2 := 0, 0
+	for i1 < len1 && i2 < len2 {
+		v1, v2 := lines1.ids[i1], lines2.ids[i2]
+		if count2[v1] == 0 {
+			// line in file1 but not in file2, exclude it and marked as changed
+			lines1.change[i1] = true
+			i1++
+		} else if count1[v2] == 0 {
+			// line in file2 but not in file1, exclude it and marked as changed
+			lines2.change[i2] = true
+			i2++
+		} else if v1 == v2 {
+			i1, i2 = i1+1, i2+1
+		} else {
+			break
+		}
+	}
+
+	// exclude lines from the end that are identical in both files
+	j1, j2 := len1-1, len2-1
+	for j1 > i1 && j2 > i2 {
+		v1, v2 := lines1.ids[j1], lines2.ids[j2]
+		if count2[v1] == 0 {
+			// line in file1 but not in file2, exclude it and marked as changed
+			lines1.change[j1] = true
+			j1--
+		} else if count1[v2] == 0 {
+			// line in file2 but not in file1, exclude it and marked as changed
+			lines2.change[j2] = true
+			j2--
+		} else if v1 == v2 {
+			j1, j2 = j1-1, j2-1
+		} else {
+			break
+		}
+	}
+
+	// store excluded lines from begining and end of file
+	lines1.zids_start, lines1.zids_end = i1, j1+1
+	lines2.zids_start, lines2.zids_end = i2, j2+1
+
 	// Go through all lines, replace chunk  lines that does not exists in the 
 	// other set with a single entry and a new id).
 	for f := 0; f < 2; f++ {
 		var count_other, ids []int
 
 		if f == 0 {
-			ids = lines1.ids
+			ids = lines1.ids[lines1.zids_start:lines1.zids_end]
 			count_other = count2
 		} else {
-			ids = lines2.ids
+			ids = lines2.ids[lines2.zids_start:lines2.zids_end]
 			count_other = count1
 		}
 
@@ -1373,33 +1427,36 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 			lines2.zlines = zlines
 		}
 	}
-
 }
 
 //
 // Do the reverse of the compress_equiv_ids.
 // zllines1 and zlines2 contains the 'extra' lines each entry represents.
 //
-func expand_change_list(info1, info2 *LinesData, zchange1, zchange2 []bool) ([]bool, []bool) {
-	change1, change2 := make([]bool, len(info1.ids)), make([]bool, len(info2.ids))
+func expand_change_list(info1, info2 *LinesData, zchange1, zchange2 []bool) {
 
 	for f := 0; f < 2; f++ {
 		var info *LinesData
 		var change, zchange []bool
 
+		// expand the changes into the range between zids_start and zids_end
 		if f == 0 {
 			info = info1
-			change = change1
+			change = info1.change[info1.zids_start:]
 			zchange = zchange1
 		} else {
 			info = info2
-			change = change2
+			change = info2.change[info2.zids_start:]
 			zchange = zchange2
 		}
 
-		n := 0
+		// no change
+		if zchange == nil {
+			continue
+		}
 
 		// expand each entry by the number of lines in zlines[]
+		n := 0
 		for i, m := range info.zlines {
 			if zchange[i] {
 				for j := 0; j < m; j, n = j+1, n+1 {
@@ -1410,10 +1467,9 @@ func expand_change_list(info1, info2 *LinesData, zchange1, zchange2 []bool) ([]b
 			}
 		}
 	}
-
-	return change1, change2
 }
 
+// open file, and read/mmap the entire content into byte array
 func open_file(fname string, finfo os.FileInfo) *Filedata {
 
 	file := &Filedata{name: fname, info: finfo}
@@ -1501,15 +1557,14 @@ func split_lines(data []byte) [][]byte {
 	return lines
 }
 
-//
 // for sorting os.FileInfo by name
-//
 type FileInfoList []os.FileInfo
 
 func (s FileInfoList) Len() int           { return len(s) }
 func (s FileInfoList) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 func (s FileInfoList) Less(i, j int) bool { return s[i].Name() < s[j].Name() }
 
+// get a list of sorted directory entries 
 func read_sorted_dir(dirname string) ([]os.FileInfo, error) {
 
 	dir, err := os.Open(dirname)
@@ -1530,6 +1585,7 @@ func read_sorted_dir(dirname string) ([]os.FileInfo, error) {
 	return all, nil
 }
 
+// compare 2 dirs.
 func diff_dirs(dirname1, dirname2 string, finfo1, finfo2 os.FileInfo) {
 
 	dirname1 = strings.TrimRight(dirname1, PATH_SEPARATOR)
@@ -1571,17 +1627,25 @@ func diff_dirs(dirname1, dirname2 string, finfo1, finfo2 os.FileInfo) {
 
 			if name1 == name2 {
 				if dir1[i1].IsDir() != dir2[i2].IsDir() {
+					if !dir_mode {
+						if dir1[i1].IsDir() {
+							output_diff_message(dirname1+PATH_SEPARATOR+name1, dirname2+PATH_SEPARATOR+name2, dir1[i1], dir2[i2], MSG_THIS_IS_DIR, MSG_THIS_IS_FILE, true)
+						} else {
+							output_diff_message(dirname1+PATH_SEPARATOR+name1, dirname2+PATH_SEPARATOR+name2, dir1[i1], dir2[i2], MSG_THIS_IS_FILE, MSG_THIS_IS_DIR, true)
+						}
+					}
 				} else if dir_mode {
+					// compare sub-directories
 					diff_dirs(dirname1+PATH_SEPARATOR+name1, dirname2+PATH_SEPARATOR+name2, dir1[i1], dir2[i2])
 				} else {
+					// compare files
 					if flag_max_goroutines > 1 {
 						queue_diff_file(dirname1+PATH_SEPARATOR+name1, dirname2+PATH_SEPARATOR+name2, dir1[i1], dir2[i2])
 					} else {
 						diff_file(dirname1+PATH_SEPARATOR+name1, dirname2+PATH_SEPARATOR+name2, dir1[i1], dir2[i2])
 					}
 				}
-				i1++
-				i2++
+				i1, i2 = i1+1, i2+1
 			} else if (i1 < len(dir1) && name1 < name2) || i2 >= len(dir2) {
 				if dir_mode {
 					output_diff_message(dirname1+PATH_SEPARATOR+name1, dirname2+PATH_SEPARATOR+name1, dir1[i1], nil, "", MSG_DIR_NOT_EXISTS, true)
@@ -1615,6 +1679,7 @@ func diff_dirs(dirname1, dirname2 string, finfo1, finfo2 os.FileInfo) {
 	}
 }
 
+// compare 2 file
 func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 
 	file1 := open_file(filename1, finfo1)
@@ -1657,78 +1722,71 @@ func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 		info1, info2 := find_equiv_lines(lines1, lines2)
 
 		// run the diff algorithm
-		change1, change2 := do_diff(info1.zids, info2.zids)
+		zchange1, zchange2 := do_diff(info1.zids, info2.zids)
 
-		if change1 != nil {
+		// expand the change list, so that change array contains changes to actual lines
+		expand_change_list(info1, info2, zchange1, zchange2)
 
-			// expand the change list, so that change array contains changes to actual lines
-			change1, change2 = expand_change_list(info1, info2, change1, change2)
+		// perform shift boundary
+		shift_boundaries(info1.ids, info1.change, nil)
+		shift_boundaries(info2.ids, info2.change, nil)
 
-			// perform shift boundary
-			shift_boundaries(info1.ids, change1, nil)
-			shift_boundaries(info2.ids, change2, nil)
+		action := DiffAction{}
 
-			action := DiffAction{}
+		diffout := OutputFormat{
+			name1:     filename1,
+			name2:     filename2,
+			fileinfo1: finfo1,
+			fileinfo2: finfo2,
+		}
 
-			diffout := OutputFormat{
-				name1:     filename1,
-				name2:     filename2,
-				fileinfo1: finfo1,
-				fileinfo2: finfo2,
+		// Use function closures here as callbacks, it maps the line number from 
+		// the comparison algorithm to the actual line lines
+		if flag_output_as_text {
+			// for output in text format
+			action.diff_insert = func(start1, end1, start2, end2 int) {
+				diff_text_insert(&diffout, lines1, lines2, start1, end1, start2, end2)
 			}
-
-			// Use function closures here as callbacks, it maps the line number from 
-			// the comparison algorithm to the actual line lines
-			if flag_output_as_text {
-				// for output in text format
-				action.diff_insert = func(start1, end1, start2, end2 int) {
-					diff_text_insert(&diffout, lines1, lines2, start1, end1, start2, end2)
-				}
-
-				action.diff_modify = func(start1, end1, start2, end2 int) {
-					diff_text_modify(&diffout, lines1, lines2, start1, end1, start2, end2)
-				}
-
-				action.diff_remove = func(start1, end1, start2, end2 int) {
-					diff_text_remove(&diffout, lines1, lines2, start1, end1, start2, end2)
-				}
-			} else {
-				// for output in html format
-				action.diff_insert = func(start1, end1, start2, end2 int) {
-					diff_html_insert(&diffout, lines1, lines2, start1, end1, start2, end2)
-				}
-
-				action.diff_modify = func(start1, end1, start2, end2 int) {
-					diff_html_modify(&diffout, lines1, lines2, start1, end1, start2, end2)
-				}
-
-				action.diff_remove = func(start1, end1, start2, end2 int) {
-					diff_html_remove(&diffout, lines1, lines2, start1, end1, start2, end2)
-				}
+			action.diff_modify = func(start1, end1, start2, end2 int) {
+				diff_text_modify(&diffout, lines1, lines2, start1, end1, start2, end2)
 			}
-
-			report_changes(&action, info1.ids, info2.ids, change1, change2)
-
-			if flag_output_as_text {
-
-				if diffout.header_printed {
-					diffout.header_printed = false
-					out_release_lock()
-				}
-
-			} else {
-
-				html_add_context_lines(&diffout, lines1, lines2, len(lines1), len(lines2))
-				html_add_block(&diffout)
-
-				if diffout.header_printed {
-					out.WriteString("</table><br>\n")
-					diffout.header_printed = false
-					out_release_lock()
-				}
+			action.diff_remove = func(start1, end1, start2, end2 int) {
+				diff_text_remove(&diffout, lines1, lines2, start1, end1, start2, end2)
 			}
+		} else {
+			// for output in html format
+			action.diff_insert = func(start1, end1, start2, end2 int) {
+				diff_html_insert(&diffout, lines1, lines2, start1, end1, start2, end2)
+			}
+			action.diff_modify = func(start1, end1, start2, end2 int) {
+				diff_html_modify(&diffout, lines1, lines2, start1, end1, start2, end2)
+			}
+			action.diff_remove = func(start1, end1, start2, end2 int) {
+				diff_html_remove(&diffout, lines1, lines2, start1, end1, start2, end2)
+			}
+		}
 
-		} else if flag_show_identical_files {
+		// output diff results
+		changed := report_changes(&action, info1.ids, info2.ids, info1.change, info2.change)
+
+		if flag_output_as_text {
+			if diffout.header_printed {
+				diffout.header_printed = false
+				out_release_lock()
+			}
+		} else {
+			// output remaining lines of all files
+			html_add_context_lines(&diffout, lines1, lines2, len(lines1), len(lines2))
+			html_add_block(&diffout)
+
+			if diffout.header_printed {
+				out.WriteString("</table><br>\n")
+				diffout.header_printed = false
+				out_release_lock()
+			}
+		}
+
+		if !changed && flag_show_identical_files {
 			// report on identical file if required
 			output_diff_message(filename1, filename2, finfo1, finfo2, MSG_FILE_IDENTICAL, MSG_FILE_IDENTICAL, false)
 		}
@@ -1768,12 +1826,10 @@ func algorithm_sms(data1, data2 []int, v []int, start_d int) (int, int) {
 	max := end1 + end2 + 1
 	up_k := end1 - end2
 	odd := (up_k & 1) != 0
-	down_off := max
-	up_off := max - up_k + (max * 2) + 2
-	var x, y, z int
+	down_off, up_off := max, max - up_k + (max * 2) + 2
+	v[down_off+1], v[up_off+up_k-1] = 0, end1
 
-	v[down_off+1] = 0
-	v[up_off+up_k-1] = end1
+	var x, y, z int
 
 	for d := start_d; true; d++ {
 		for k := -d; k <= d; k += 2 {
@@ -1789,7 +1845,7 @@ func algorithm_sms(data1, data2 []int, v []int, start_d int) (int, int) {
 				x, y = x+1, y+1
 			}
 			if odd && (up_k-d < k) && (k < up_k+d) && v[up_off+k] <= x {
-				return x, x - k
+				return x, y
 			}
 			v[down_off+k] = x
 		}
@@ -1807,7 +1863,7 @@ func algorithm_sms(data1, data2 []int, v []int, start_d int) (int, int) {
 				x, y = x-1, y-1
 			}
 			if !odd && (-d <= k) && (k <= d) && x <= v[down_off+k] {
-				return x, x - k
+				return x, y
 			}
 			v[up_off+k] = x
 		}
@@ -1818,46 +1874,41 @@ func algorithm_sms(data1, data2 []int, v []int, start_d int) (int, int) {
 //
 // An O(ND) Difference Algorithm: Find LCS
 //
-func algorithm_lcs(data1, data2 []int, change1, change2 []bool, v []int) bool {
+func algorithm_lcs(data1, data2 []int, change1, change2 []bool, v []int) {
 
-	start1, end1 := 0, len(data1)
-	start2, end2 := 0, len(data2)
-	changed := false
+	start := 0
+	end1, end2 := len(data1), len(data2)
 
 	// matches found at start and end of list
-	for start1 < end1 && start2 < end2 && data1[start1] == data2[start2] {
-		start1, start2 = start1+1, start2+1
+	for start < end1 && start < end2 && data1[start] == data2[start] {
+		start = start + 1
 	}
-	for start1 < end1 && start2 < end2 && data1[end1-1] == data2[end2-1] {
+	for start < end1 && start < end2 && data1[end1-1] == data2[end2-1] {
 		end1, end2 = end1-1, end2-1
 	}
 
 	switch {
-	case start1 == end1:
+	case start == end1:
 		// mark remaining data2 as 'inserted'
-		for start2 < end2 {
-			change2[start2], start2 = true, start2+1
-			changed = true
+		for start < end2 {
+			change2[start], start = true, start+1
 		}
 
-	case start2 == end2:
+	case start == end2:
 		// mark remaining data1 as 'deleted'
-		for start1 < end1 {
-			change1[start1], start1 = true, start1+1
-			changed = true
+		for start < end1 {
+			change1[start], start = true, start+1
 		}
 
 	default:
 		// Find a point of correspondence in the middle of the vectors.
-		mid1, mid2 := algorithm_sms(data1[start1:end1], data2[start2:end2], v, 0)
-		mid1, mid2 = mid1+start1, mid2+start2
+		mid1, mid2 := algorithm_sms(data1[start:end1], data2[start:end2], v, 0)
+		mid1, mid2 = mid1+start, mid2+start
 
 		// Use the partitions to split this problem into subproblems.
-		r1 := algorithm_lcs(data1[start1:mid1], data2[start2:mid2], change1[start1:mid1], change2[start2:mid2], v)
-		r2 := algorithm_lcs(data1[mid1:end1], data2[mid2:end2], change1[mid1:end1], change2[mid2:end2], v)
-		changed = changed || r1 || r2
+		algorithm_lcs(data1[start:mid1], data2[start:mid2], change1[start:mid1], change2[start:mid2], v)
+		algorithm_lcs(data1[mid1:end1], data2[mid2:end2], change1[mid1:end1], change2[mid2:end2], v)
 	}
-	return changed
 }
 
 // Perform the shift

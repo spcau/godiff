@@ -1336,46 +1336,66 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 	}
 
 	// exclude lines from the begining that are identical in both files
+	// if line in file1 but not in file2, exclude it and marked as changed
+	// if line in file2 but not in file1, exclude it and marked as changed
 	i1, i2 := 0, 0
 	for i1 < len1 && i2 < len2 {
 		v1, v2 := lines1.ids[i1], lines2.ids[i2]
 		if count2[v1] == 0 {
-			// line in file1 but not in file2, exclude it and marked as changed
 			lines1.change[i1] = true
 			i1++
 		} else if count1[v2] == 0 {
-			// line in file2 but not in file1, exclude it and marked as changed
 			lines2.change[i2] = true
 			i2++
 		} else if v1 == v2 {
-			i1, i2 = i1+1, i2+1
+			i1++
+			i2++
 		} else {
 			break
 		}
 	}
 
 	// exclude lines from the end that are identical in both files
-	j1, j2 := len1-1, len2-1
-	for j1 > i1 && j2 > i2 {
-		v1, v2 := lines1.ids[j1], lines2.ids[j2]
+	// if line in file1 but not in file2, exclude it and marked as changed
+	// if line in file2 but not in file1, exclude it and marked as changed
+	j1, j2 := len1, len2
+	for i1 < j1 && i2 < j2 {
+		v1, v2 := lines1.ids[j1-1], lines2.ids[j2-1]
 		if count2[v1] == 0 {
-			// line in file1 but not in file2, exclude it and marked as changed
-			lines1.change[j1] = true
 			j1--
+			lines1.change[j1] = true
 		} else if count1[v2] == 0 {
-			// line in file2 but not in file1, exclude it and marked as changed
-			lines2.change[j2] = true
 			j2--
+			lines2.change[j2] = true
 		} else if v1 == v2 {
-			j1, j2 = j1-1, j2-1
+			j1--
+			j2--
 		} else {
 			break
 		}
 	}
 
+	// One of the list is empty, no need to run diff algorithm for comparison.
+	// Just mark the remaining lines other list as changed.
+	switch {
+	case i1 == j1:
+		for i2 < j2 {
+			lines2.change[i2] = true
+			i2++
+		}
+		return
+
+	case i2 == j2:
+		for i1 < j1 {
+			lines1.change[i1] = true
+			i1++
+		}
+		return
+	}
+
 	// store excluded lines from begining and end of file
-	lines1.zids_start, lines1.zids_end = i1, j1+1
-	lines2.zids_start, lines2.zids_end = i2, j2+1
+	lines1.zids_start, lines1.zids_end = i1, j1
+	lines2.zids_start, lines2.zids_end = i2, j2
 
 	// Go through all lines, replace chunk  lines that does not exists in the 
 	// other set with a single entry and a new id).
@@ -1721,11 +1741,15 @@ func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 		// Compute equiv ids for each line.
 		info1, info2 := find_equiv_lines(lines1, lines2)
 
-		// run the diff algorithm
-		zchange1, zchange2 := do_diff(info1.zids, info2.zids)
+		// No zids avaiable, no need to run diff comparision algorithm
+		// The find_equiv_lines() function may have perform the comparison already.
+		if info1.zids != nil && info2.zids != nil {
+			// run the diff algorithm
+			zchange1, zchange2 := do_diff(info1.zids, info2.zids)
 
-		// expand the change list, so that change array contains changes to actual lines
-		expand_change_list(info1, info2, zchange1, zchange2)
+			// expand the change list, so that change array contains changes to actual lines
+			expand_change_list(info1, info2, zchange1, zchange2)
+		}
 
 		// perform shift boundary
 		shift_boundaries(info1.ids, info1.change, nil)
@@ -1820,18 +1844,18 @@ func min_int(a, b int) int {
 //
 // An O(ND) Difference Algorithm: Find middle snake
 //
-func algorithm_sms(data1, data2 []int, v []int, start_d int) (int, int) {
+func algorithm_sms(data1, data2 []int, v []int) (int, int) {
 
 	end1, end2 := len(data1), len(data2)
 	max := end1 + end2 + 1
 	up_k := end1 - end2
 	odd := (up_k & 1) != 0
-	down_off, up_off := max, max - up_k + (max * 2) + 2
+	down_off, up_off := max, max-up_k+(max*2)+2
 	v[down_off+1], v[up_off+up_k-1] = 0, end1
 
 	var x, y, z int
 
-	for d := start_d; true; d++ {
+	for d := 0; true; d++ {
 		for k := -d; k <= d; k += 2 {
 			x = v[down_off+k+1]
 			if k > -d {
@@ -1849,7 +1873,6 @@ func algorithm_sms(data1, data2 []int, v []int, start_d int) (int, int) {
 			}
 			v[down_off+k] = x
 		}
-
 		for k := up_k - d; k <= up_k+d; k += 2 {
 			x = v[up_off+k-1]
 			if k < up_k+d {
@@ -1876,38 +1899,41 @@ func algorithm_sms(data1, data2 []int, v []int, start_d int) (int, int) {
 //
 func algorithm_lcs(data1, data2 []int, change1, change2 []bool, v []int) {
 
-	start := 0
+	start1, start2 := 0, 0
 	end1, end2 := len(data1), len(data2)
 
 	// matches found at start and end of list
-	for start < end1 && start < end2 && data1[start] == data2[start] {
-		start = start + 1
+	for start1 < end1 && start2 < end2 && data1[start1] == data2[start2] {
+		start1++
+		start2++
 	}
-	for start < end1 && start < end2 && data1[end1-1] == data2[end2-1] {
-		end1, end2 = end1-1, end2-1
+	for start1 < end1 && start2 < end2 && data1[end1-1] == data2[end2-1] {
+		end1--
+		end2--
 	}
 
-	switch {
-	case start == end1:
-		// mark remaining data2 as 'inserted'
-		for start < end2 {
-			change2[start], start = true, start+1
-		}
+	len1, len2 := end1-start1, end2-start2
 
-	case start == end2:
-		// mark remaining data1 as 'deleted'
-		for start < end1 {
-			change1[start], start = true, start+1
+	if len1 == 0 || len2 == 0 || (len1 == 1 && len2 == 1) {
+		// mark both lists as changed
+		for start1 < end1 {
+			change1[start1] = true
+			start1++
 		}
+		for start2 < end2 {
+			change2[start2] = true
+			start2++
+		}
+	} else {
+		data1, change1 = data1[start1:end1], change1[start1:end1]
+		data2, change2 = data2[start2:end2], change2[start2:end2]
 
-	default:
 		// Find a point of correspondence in the middle of the vectors.
-		mid1, mid2 := algorithm_sms(data1[start:end1], data2[start:end2], v, 0)
-		mid1, mid2 = mid1+start, mid2+start
+		mid1, mid2 := algorithm_sms(data1, data2, v)
 
 		// Use the partitions to split this problem into subproblems.
-		algorithm_lcs(data1[start:mid1], data2[start:mid2], change1[start:mid1], change2[start:mid2], v)
-		algorithm_lcs(data1[mid1:end1], data2[mid2:end2], change1[mid1:end1], change2[mid2:end2], v)
+		algorithm_lcs(data1[:mid1], data2[:mid2], change1[:mid1], change2[:mid2], v)
+		algorithm_lcs(data1[mid1:], data2[mid2:], change1[mid1:], change2[mid2:], v)
 	}
 }
 

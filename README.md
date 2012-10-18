@@ -22,3 +22,11 @@ See `godiff -h` for all the available command line options
 ##Go Language
 This program is created in the go language.
 Download go from [golang.org](http://golang.org)
+
+##How to Build
+On Linux or Darwin OS
+	go build -o godiff godiff.go godiff_unix.go
+
+On Windows
+	go build -o godiff.exe  godiff.go godiff_windows.go
+

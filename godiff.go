@@ -54,7 +54,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -75,17 +74,17 @@ const CONTEXT_LINES = 3
 const PATH_SEPARATOR = string(os.PathSeparator)
 
 // use mmap for file greather than this size
-const MMAP_THRESHOLD = 200000
+const MMAP_THRESHOLD = 100 * 1024
 
 // Mmap'ed file 
 type Filedata struct {
-	name       string
-	info       os.FileInfo
-	handle     *os.File
-	errormsg   string
-	is_binary  bool
-	is_mmapped bool
-	data       []byte
+	name      string
+	info      os.FileInfo
+	handle    *os.File
+	errormsg  string
+	is_binary bool
+	is_mapped bool
+	data      []byte
 }
 
 // Callback funcs for diff.
@@ -920,8 +919,8 @@ func diff_text_remove(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1,
 
 func (file *Filedata) close_file() {
 	if file.handle != nil {
-		if file.is_mmapped && file.data != nil {
-			syscall.Munmap(file.data)
+		if file.is_mapped && file.data != nil {
+			unmap_file(file.data)
 		}
 		file.handle.Close()
 		file.handle = nil
@@ -1515,7 +1514,7 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 
 	if file.info.Size() > MMAP_THRESHOLD {
 		// map to file into memory, leave file open.
-		file.data, err = syscall.Mmap(int(file.handle.Fd()), 0, int(file.info.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
+		file.data, err = map_file(file.handle, 0, int(file.info.Size()))
 		if err != nil {
 			file.handle.Close()
 			file.handle = nil
@@ -1523,7 +1522,7 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 			file.errormsg = err.Error()
 			return file
 		}
-		file.is_mmapped = true
+		file.is_mapped = true
 	} else {
 		// read in the entire file
 		buf := bytes.NewBuffer(make([]byte, 0, file.info.Size()+1))
@@ -1553,7 +1552,7 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 func split_lines(data []byte) [][]byte {
 
 	size := len(data)
-	lines := make([][]byte, 0, size/64+10)
+	lines := make([][]byte, 0, size/20+10)
 	previ := 0
 	var lastb byte
 
@@ -1570,8 +1569,8 @@ func split_lines(data []byte) [][]byte {
 	}
 
 	// add last incomplete line (if required)
-	if len(data) > previ {
-		lines = append(lines, data[previ:len(data)])
+	if size > previ {
+		lines = append(lines, data[previ:size])
 	}
 
 	return lines

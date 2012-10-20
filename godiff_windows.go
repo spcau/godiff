@@ -19,18 +19,32 @@ package main
 
 import (
 	"os"
+	"sync"
 	"syscall"
 	"unsafe"
 )
 
+var win_mapper_mutex sync.Mutex
+var win_mapper_handle = make(map[uintptr]syscall.Handle)
+
 // Implement mmap for windows
 func map_file(file *os.File, offset, size int) ([]byte, error) {
-	// call the windows function
-	addr, err := syscall.MapViewOfFile(syscall.Handle(file.Fd()), syscall.FILE_MAP_READ, uint32(offset>>32), uint32(offset), uintptr(size))
 
+	// create the mapping handle
+	h, err := syscall.CreateFileMapping(syscall.Handle(file.Fd()), nil, syscall.PAGE_READONLY, 0, uint32(size), nil)
 	if err != nil {
 		return nil, err
 	}
+
+	// perform the file map operation
+	addr, err := syscall.MapViewOfFile(h, syscall.FILE_MAP_READ, uint32(offset>>32), uint32(offset), uintptr(size))
+	if err != nil {
+		return nil, err
+	}
+
+	win_mapper_mutex.Lock()
+	win_mapper_handle[addr] = h
+	win_mapper_mutex.Unlock()
 
 	// Slice memory layout
 	sl := struct {
@@ -51,6 +65,18 @@ func unmap_file(data []byte) error {
 	// Use unsafe to get the buffer address
 	addr := uintptr(unsafe.Pointer(&data[0]))
 
+	win_mapper_mutex.Lock()
+	h := win_mapper_handle[addr]
+	delete(win_mapper_handle, addr)
+	win_mapper_mutex.Unlock()
+
 	// call the windows function
-	return syscall.UnmapViewOfFile(addr)
+	err := syscall.UnmapViewOfFile(addr)
+
+	// close the mapping handle
+	if err == nil {
+		err = syscall.CloseHandle(h)
+	}
+
+	return err
 }

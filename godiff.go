@@ -80,7 +80,7 @@ const MMAP_THRESHOLD = 8 * 1024
 type Filedata struct {
 	name      string
 	info      os.FileInfo
-	handle    *os.File
+	osfile    *os.File
 	errormsg  string
 	is_binary bool
 	is_mapped bool
@@ -919,12 +919,12 @@ func diff_text_remove(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1,
 }
 
 func (file *Filedata) close_file() {
-	if file.handle != nil {
+	if file.osfile != nil {
 		if file.is_mapped && file.data != nil {
 			unmap_file(file.data)
 		}
-		file.handle.Close()
-		file.handle = nil
+		file.osfile.Close()
+		file.osfile = nil
 	}
 	file.data = nil
 }
@@ -1520,19 +1520,19 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 	}
 
 	// open the file
-	file.handle, err = os.Open(file.name)
+	file.osfile, err = os.Open(file.name)
 	if err != nil {
-		file.handle = nil
+		file.osfile = nil
 		file.errormsg = err.Error()
 		return file
 	}
 
 	if fsize > MMAP_THRESHOLD {
 		// map to file into memory, leave file open.
-		file.data, err = map_file(file.handle, 0, int(fsize))
+		file.data, err = map_file(file.osfile, 0, int(fsize))
 		if err != nil {
-			file.handle.Close()
-			file.handle = nil
+			file.osfile.Close()
+			file.osfile = nil
 			file.data = nil
 			file.errormsg = err.Error()
 			return file
@@ -1541,15 +1541,15 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 	} else {
 		// read in the entire file
 		fdata := make([]byte, fsize, fsize)
-		n, err := file.handle.ReadAt(fdata, 0)
+		n, err := file.osfile.ReadAt(fdata, 0)
 		if err != nil {
 			file.errormsg = err.Error()
 			return file
 		}
 		file.data = fdata[:n]
 		// close file
-		file.handle.Close()
-		file.handle = nil
+		file.osfile.Close()
+		file.osfile = nil
 	}
 
 	return file

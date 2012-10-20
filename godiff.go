@@ -1326,15 +1326,6 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 	return &info1, &info2
 }
 
-type LineLoc struct {
-	line int
-	next *LineLoc
-}
-
-type LineSnake struct {
-	x, y, length int
-}
-
 // Count the occurrances of each unique ids in both sets of lines, we will then know which lines are only present in one file, but not the other.
 // Remove chunks of lines that do not appear in the other files, and replace with a single entry
 // Return compressed lists of ids and a list indicating where are the chunk of lines being replaced

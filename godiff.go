@@ -65,7 +65,7 @@ const VERSION = "0.01"
 const BINARY_CHECK_SIZE = 65536
 
 // Output buffer size
-const OUTPUT_BUF_SIZE = 100000
+const OUTPUT_BUF_SIZE = 65536
 
 // default number of context lines to display
 const CONTEXT_LINES = 3
@@ -73,8 +73,8 @@ const CONTEXT_LINES = 3
 // convenient shortcut
 const PATH_SEPARATOR = string(os.PathSeparator)
 
-// use mmap for file greather than this size
-const MMAP_THRESHOLD = 100 * 1024
+// use mmap for file greather than this size, for smaller files just use Read() instead.
+const MMAP_THRESHOLD = 8 * 1024
 
 // Mmap'ed file 
 type Filedata struct {
@@ -176,6 +176,7 @@ type JobQueue struct {
 	info1, info2 os.FileInfo
 }
 
+// Queue queue for goroutines diff_file
 var job_queue chan JobQueue
 var job_wait sync.WaitGroup
 
@@ -202,7 +203,6 @@ func usage(msg string) {
 	fmt.Fprint(os.Stderr, "A text file comparison tool displaying differenes in HTML\n\n")
 	fmt.Fprint(os.Stderr, "usage: godiff <options> <file|dir> <file|dir>\n")
 	flag.PrintDefaults()
-	out.Flush()
 	os.Exit(2)
 }
 
@@ -240,6 +240,7 @@ func main() {
 		os.Exit(0)
 	}
 
+	// write pprof info
 	if flag_pprof_file != "" {
 		pf, err := os.Create(flag_pprof_file)
 		if err != nil {
@@ -1263,6 +1264,7 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 	}
 
 	// the unique id for identical lines, start with 1.
+	var max_id_f1, max_id_f2 int
 	next_id := 1
 
 	// process both sets of lines
@@ -1311,27 +1313,42 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 				}
 			}
 		}
+
+		if f == 0 {
+			max_id_f1 = next_id - 1
+		} else {
+			max_id_f2 = next_id - 1
+		}
 	}
 
-	compress_equiv_ids(&info1, &info2, next_id)
+	compress_equiv_ids(&info1, &info2, max_id_f1, max_id_f2)
 
 	return &info1, &info2
+}
+
+type LineLoc struct {
+	line int
+	next *LineLoc
+}
+
+type LineSnake struct {
+	x, y, length int
 }
 
 // Count the occurrances of each unique ids in both sets of lines, we will then know which lines are only present in one file, but not the other.
 // Remove chunks of lines that do not appear in the other files, and replace with a single entry
 // Return compressed lists of ids and a list indicating where are the chunk of lines being replaced
-func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
+func compress_equiv_ids(lines1, lines2 *LinesData, max_id1, max_id2 int) {
 
 	len1, len2 := len(lines1.ids), len(lines2.ids)
-	count1, count2 := make([]int, next_id), make([]int, next_id)
+	has_ids1, has_ids2 := make([]bool, max_id1+1), make([]bool, max_id2+1)
 
-	// count the number of occurrances of each id's
+	// Determine which id's are in the each file
 	for _, v := range lines1.ids {
-		count1[v]++
+		has_ids1[v] = true
 	}
 	for _, v := range lines2.ids {
-		count2[v]++
+		has_ids2[v] = true
 	}
 
 	// exclude lines from the begining that are identical in both files
@@ -1340,10 +1357,10 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 	i1, i2 := 0, 0
 	for i1 < len1 && i2 < len2 {
 		v1, v2 := lines1.ids[i1], lines2.ids[i2]
-		if count2[v1] == 0 {
+		if v1 > max_id2 || !has_ids2[v1] {
 			lines1.change[i1] = true
 			i1++
-		} else if count1[v2] == 0 {
+		} else if v2 > max_id1 || !has_ids1[v2] {
 			lines2.change[i2] = true
 			i2++
 		} else if v1 == v2 {
@@ -1360,10 +1377,10 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 	j1, j2 := len1, len2
 	for i1 < j1 && i2 < j2 {
 		v1, v2 := lines1.ids[j1-1], lines2.ids[j2-1]
-		if count2[v1] == 0 {
+		if v1 > max_id2 || !has_ids2[v1] {
 			j1--
 			lines1.change[j1] = true
-		} else if count1[v2] == 0 {
+		} else if v2 > max_id1 || !has_ids1[v2] {
 			j2--
 			lines2.change[j2] = true
 		} else if v1 == v2 {
@@ -1374,7 +1391,7 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 		}
 	}
 
-	// One of the list is empty, no need to run diff algorithm for comparison.
+	// One of the list is now empty, no need to run diff algorithm for comparison.
 	// Just mark the remaining lines other list as changed.
 	switch {
 	case i1 == j1:
@@ -1398,15 +1415,20 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 
 	// Go through all lines, replace chunk  lines that does not exists in the 
 	// other set with a single entry and a new id).
+	next_id := max_int(max_id1, max_id2) + 1
 	for f := 0; f < 2; f++ {
-		var count_other, ids []int
+		var ids []int
+		var has_ids []bool
+		var max_id int
 
 		if f == 0 {
 			ids = lines1.ids[lines1.zids_start:lines1.zids_end]
-			count_other = count2
+			has_ids = has_ids2
+			max_id = max_id2
 		} else {
 			ids = lines2.ids[lines2.zids_start:lines2.zids_end]
-			count_other = count1
+			has_ids = has_ids1
+			max_id = max_id1
 		}
 
 		// new slices for compressed ids and the number of lines each entry replaced
@@ -1417,7 +1439,7 @@ func compress_equiv_ids(lines1, lines2 *LinesData, next_id int) {
 		lastexclude := false
 		n := 0
 		for _, v := range ids {
-			exclude := (count_other[v] == 0)
+			exclude := (v > max_id || !has_ids[v])
 			if exclude && lastexclude {
 				zlines[n-1]++
 				zids[n-1] = -next_id
@@ -1492,15 +1514,17 @@ func expand_change_list(info1, info2 *LinesData, zchange1, zchange2 []bool) {
 func open_file(fname string, finfo os.FileInfo) *Filedata {
 
 	file := &Filedata{name: fname, info: finfo}
+	fsize := file.info.Size()
 
 	var err error
 
-	if file.info.Size() >= 1e9 {
+	if fsize >= 1e8 {
 		file.errormsg = MSG_FILE_TOO_BIG
 		return file
 	}
 
-	if file.info.Size() <= 0 {
+	// zero size file.
+	if fsize <= 0 {
 		return file
 	}
 
@@ -1512,9 +1536,9 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 		return file
 	}
 
-	if file.info.Size() > MMAP_THRESHOLD {
+	if fsize > MMAP_THRESHOLD {
 		// map to file into memory, leave file open.
-		file.data, err = map_file(file.handle, 0, int(file.info.Size()))
+		file.data, err = map_file(file.handle, 0, int(fsize))
 		if err != nil {
 			file.handle.Close()
 			file.handle = nil
@@ -1525,52 +1549,49 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 		file.is_mapped = true
 	} else {
 		// read in the entire file
-		buf := bytes.NewBuffer(make([]byte, 0, file.info.Size()+1))
-		_, err = buf.ReadFrom(file.handle)
+		fdata := make([]byte, fsize, fsize)
+		n, err := file.handle.ReadAt(fdata, 0)
 		if err != nil {
 			file.errormsg = err.Error()
 			return file
 		}
-		file.data = buf.Bytes()
+		file.data = fdata[:n]
 		// close file
 		file.handle.Close()
 		file.handle = nil
 	}
 
-	// is binary if it has 'null' character
-	if bytes.IndexByte(file.data[:min_int(BINARY_CHECK_SIZE, len(file.data))], 0) >= 0 {
-		file.is_binary = true
-		file.errormsg = MSG_FILE_IS_BINARY
-		return file
-	}
 	return file
 }
 
 //
 // split up data into text lines
 //
-func split_lines(data []byte) [][]byte {
+func (file *Filedata) split_lines() [][]byte {
 
-	size := len(data)
-	lines := make([][]byte, 0, size/20+10)
+	lines := make([][]byte, 0, len(file.data)/20+10)
 	previ := 0
 	var lastb byte
 
+	data := file.data
 	for i, b := range data {
-
 		// accept dos, unix, mac newline
 		if b == '\n' && lastb == '\r' {
 			previ = i + 1
 		} else if b == '\n' || b == '\r' {
 			lines = append(lines, data[previ:i])
 			previ = i + 1
+		} else if b == 0 && i < BINARY_CHECK_SIZE {
+			file.is_binary = true
+			file.errormsg = MSG_FILE_IS_BINARY
+			return nil
 		}
 		lastb = b
 	}
 
 	// add last incomplete line (if required)
-	if size > previ {
-		lines = append(lines, data[previ:size])
+	if len(data) > previ {
+		lines = append(lines, data[previ:len(data)])
 	}
 
 	return lines
@@ -1704,6 +1725,24 @@ func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 	file1 := open_file(filename1, finfo1)
 	file2 := open_file(filename2, finfo2)
 
+	defer file1.close_file()
+	defer file2.close_file()
+
+	if file1.errormsg != "" || file2.errormsg != "" {
+		// display error messages
+		output_diff_message(filename1, filename2, finfo1, finfo2, file1.errormsg, file2.errormsg, true)
+		return
+	} else if bytes.Equal(file1.data, file2.data) {
+		// files are equal
+		if flag_show_identical_files {
+			output_diff_message(filename1, filename2, finfo1, finfo2, MSG_FILE_IDENTICAL, MSG_FILE_IDENTICAL, false)
+		}
+		return
+	}
+
+	lines1 := file1.split_lines()
+	lines2 := file2.split_lines()
+
 	if file1.is_binary || file2.is_binary {
 
 		var msg1, msg2 string
@@ -1725,17 +1764,7 @@ func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 		if msg1 != "" || msg2 != "" {
 			output_diff_message(filename1, filename2, finfo1, finfo2, msg1, msg2, true)
 		}
-	} else if file1.errormsg != "" || file2.errormsg != "" {
-		// display error messages
-		output_diff_message(filename1, filename2, finfo1, finfo2, file1.errormsg, file2.errormsg, true)
-	} else if bytes.Equal(file1.data, file2.data) {
-		// files are equal
-		if flag_show_identical_files {
-			output_diff_message(filename1, filename2, finfo1, finfo2, MSG_FILE_IDENTICAL, MSG_FILE_IDENTICAL, false)
-		}
 	} else {
-		lines1 := split_lines(file1.data)
-		lines2 := split_lines(file2.data)
 
 		// Compute equiv ids for each line.
 		info1, info2 := find_equiv_lines(lines1, lines2)
@@ -1815,8 +1844,6 @@ func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 		}
 	}
 
-	file1.close_file()
-	file2.close_file()
 }
 
 func abs_int(a int) int {
@@ -1893,6 +1920,15 @@ func algorithm_sms(data1, data2 []int, v []int) (int, int) {
 	return 0, 0 // should not reach here
 }
 
+func find_one_sms(value int, list []int) (int, int) {
+	for i, v := range list {
+		if v == value {
+			return 0, i
+		}
+	}
+	return 1, 0
+}
+
 //
 // An O(ND) Difference Algorithm: Find LCS
 //
@@ -1913,22 +1949,38 @@ func algorithm_lcs(data1, data2 []int, change1, change2 []bool, v []int) {
 
 	len1, len2 := end1-start1, end2-start2
 
-	if len1 == 0 || len2 == 0 || (len1 == 1 && len2 == 1) {
-		// mark both lists as changed
-		for start1 < end1 {
-			change1[start1] = true
-			start1++
-		}
+	switch {
+	case len1 == 0:
 		for start2 < end2 {
 			change2[start2] = true
 			start2++
 		}
-	} else {
+	case len2 == 0:
+		for start1 < end1 {
+			change1[start1] = true
+			start1++
+		}
+
+	case len1 == 1 && len2 == 1:
+		change1[start1] = true
+		change2[start2] = true
+
+	default:
 		data1, change1 = data1[start1:end1], change1[start1:end1]
 		data2, change2 = data2[start2:end2], change2[start2:end2]
 
-		// Find a point of correspondence in the middle of the vectors.
-		mid1, mid2 := algorithm_sms(data1, data2, v)
+		var mid1, mid2 int
+
+		if len(data1) == 1 {
+			// match one item, use simple search function
+			mid1, mid2 = find_one_sms(data1[0], data2)
+		} else if len(data2) == 1 {
+			// match one item, use simple search function
+			mid2, mid1 = find_one_sms(data2[0], data1)
+		} else {
+			// Find a point with the longest common sequence
+			mid1, mid2 = algorithm_sms(data1, data2, v)
+		}
 
 		// Use the partitions to split this problem into subproblems.
 		algorithm_lcs(data1[:mid1], data2[:mid2], change1[:mid1], change2[:mid2], v)

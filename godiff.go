@@ -1541,7 +1541,7 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 	} else {
 		// read in the entire file
 		fdata := make([]byte, fsize, fsize)
-		n, err := file.osfile.ReadAt(fdata, 0)
+		n, err := file.osfile.Read(fdata)
 		if err != nil {
 			file.errormsg = err.Error()
 			return file
@@ -1867,43 +1867,45 @@ func algorithm_sms(data1, data2 []int, v []int) (int, int) {
 	max := end1 + end2 + 1
 	up_k := end1 - end2
 	odd := (up_k & 1) != 0
-	down_off, up_off := max, max-up_k+(max*2)+2
-	v[down_off+1], v[up_off+up_k-1] = 0, end1
+	down_off, up_off := max, max-up_k+max+max+2
 
-	var x, y, z int
+	v[down_off+1] = 0
+	v[down_off] = 0
+	v[up_off+up_k-1] = end1
+	v[up_off+up_k] = end1
 
-	for d := 0; true; d++ {
-		for k := -d; k <= d; k += 2 {
+	var k, x, z int
+
+	for d := 1; true; d++ {
+		for k = -d; k <= d; k += 2 {
 			x = v[down_off+k+1]
-			if k > -d {
-				z = v[down_off+k-1] + 1
-				if (k == d) || (z > x) {
-					x = z
-				}
+			if k > -d && (k == d || z >= x) {
+				x, z = z+1, x
+			} else {
+				z = x
 			}
-			y = x - k
-			for (x < end1) && (y < end2) && data1[x] == data2[y] {
-				x, y = x+1, y+1
+			for x < end1 && x-k < end2 && data1[x] == data2[x-k] {
+				x++
 			}
 			if odd && (up_k-d < k) && (k < up_k+d) && v[up_off+k] <= x {
-				return x, y
+				return x, x - k
 			}
 			v[down_off+k] = x
 		}
-		for k := up_k - d; k <= up_k+d; k += 2 {
-			x = v[up_off+k-1]
+		z = v[up_off+up_k-d-1]
+		for k = up_k - d; k <= up_k+d; k += 2 {
+			x = z
 			if k < up_k+d {
-				z = v[up_off+k+1] - 1
-				if (k == up_k-d) || (z < x) {
-					x = z
+				z = v[up_off+k+1]
+				if k == up_k-d || z <= x {
+					x = z - 1
 				}
 			}
-			y = x - k
-			for (x > 0) && (y > 0) && data1[x-1] == data2[y-1] {
-				x, y = x-1, y-1
+			for x > 0 && x > k && data1[x-1] == data2[x-k-1] {
+				x--
 			}
 			if !odd && (-d <= k) && (k <= d) && x <= v[down_off+k] {
-				return x, y
+				return x, x - k
 			}
 			v[up_off+k] = x
 		}
@@ -1911,6 +1913,9 @@ func algorithm_sms(data1, data2 []int, v []int) (int, int) {
 	return 0, 0 // should not reach here
 }
 
+//
+// Special case for algorithm_sms() with only 1 item.
+//
 func find_one_sms(value int, list []int) (int, int) {
 	for i, v := range list {
 		if v == value {
@@ -1946,6 +1951,7 @@ func algorithm_lcs(data1, data2 []int, change1, change2 []bool, v []int) {
 			change2[start2] = true
 			start2++
 		}
+
 	case len2 == 0:
 		for start1 < end1 {
 			change1[start1] = true

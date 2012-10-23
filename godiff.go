@@ -112,7 +112,8 @@ const (
 	MSG_FILE_NOT_EXISTS  = "File does not exist"
 	MSG_DIR_NOT_EXISTS   = "Directory does not exist"
 	MSG_FILE_IS_BINARY   = "This is a binary file"
-	MSG_BIN_FILE_DIFFERS = "Binary file differs"
+	MSG_FILE_DIFFERS     = "File differs"
+	MSG_BIN_FILE_DIFFERS = "File differs. This is a binary file"
 	MSG_FILE_IDENTICAL   = "Files are the same"
 	MSG_FILE_TOO_BIG     = "File too big"
 	MSG_THIS_IS_DIR      = "This is a directory"
@@ -256,7 +257,7 @@ func main() {
 		out = nil
 	}()
 
-	// choose which compare hash hash function to use
+	// choose which compare and hash function to use
 	if flag_cmp_ignore_case || flag_cmp_ignore_space_change || flag_cmp_ignore_all_space {
 		if flag_unicode_case_and_space {
 			compute_hash = compute_hash_unicode
@@ -1109,6 +1110,7 @@ const fnv_offset32 = 2166136261
 const fnv_prime32 = 16777619
 
 func hash32(h uint32, b byte) uint32 {
+
 	return (h ^ uint32(b)) * fnv_prime32
 }
 
@@ -1221,46 +1223,54 @@ func compute_hash_unicode(line1 []byte) uint32 {
 }
 
 type EquivClass struct {
-	line_id int
-	line    []byte
-	hash    uint32
-	next    *EquivClass
+	id   int
+	hash uint32
+	line *[]byte
+	next *EquivClass
 }
 
 type LinesData struct {
 	ids        []int // Id's for each line, 
 	zids       []int // list of ids with unmatched lines replaced by a single entry (and blank lines removed)
-	zlines     []int // Number of lines that represent each zids entry
+	zcount     []int // Number of lines that represent each zids entry
 	change     []bool
 	zids_start int
 	zids_end   int
 }
+
+var blank_line = make([]byte, 0)
 
 //
 // Compute id's that represent the original lines, these numeric id's are use for faster line comparison.
 //
 func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 
-	len1, len2 := len(lines1), len(lines2)
-	info1, info2 := LinesData{}, LinesData{}
-	info1.ids, info2.ids = make([]int, len1), make([]int, len2)
-	info1.change, info2.change = make([]bool, len1), make([]bool, len2)
+	info1 := LinesData{
+		ids:    make([]int, len(lines1)),
+		change: make([]bool, len(lines1)),
+	}
+
+	info2 := LinesData{
+		ids:    make([]int, len(lines2)),
+		change: make([]bool, len(lines2)),
+	}
 
 	// since we already have a hashing function, it's faster to use arrays than to use go's builtin map
 	// Use bucket size that is power of 2
 	buckets := 1 << 9
-	for buckets < (len1+len2)*2 {
+	for buckets < (len(lines1)+len(lines2))*2 {
 		buckets = buckets << 1
 	}
+
+	// create the slice we are using for hash tables
 	eqhash := make([]*EquivClass, buckets)
 
 	// Use id=0 for blank lines. 
 	// Later in report_changes(), do not report changes on chunks of lines with id=0
 	if flag_cmp_ignore_blank_lines {
-		blank := lines1[0][0:0] // blank line
-		hashcode := compute_hash(blank)
+		hashcode := compute_hash(blank_line)
 		ihash := int(hashcode) & (buckets - 1)
-		eqhash[ihash] = &EquivClass{line_id: 0, line: blank, hash: hashcode}
+		eqhash[ihash] = &EquivClass{id: 0, line: &blank_line, hash: hashcode}
 	}
 
 	// the unique id for identical lines, start with 1.
@@ -1280,35 +1290,35 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 			ids = info2.ids
 		}
 
-		for i, ll := range lines {
+		for i := 0; i < len(lines); i++ {
+			lptr := &lines[i]
 			// find current line in eqhash
-			hashcode := compute_hash(ll)
+			hashcode := compute_hash(*lptr)
 			ihash := int(hashcode) & (buckets - 1)
 			eq := eqhash[ihash]
-			switch {
-			// not found in eqhash, create new entry
-			case eq == nil:
+
+			if eq == nil {
+				// not found in eqhash, create new entry
 				ids[i] = next_id
-				eqhash[ihash] = &EquivClass{line_id: next_id, line: ll, hash: hashcode}
+				eqhash[ihash] = &EquivClass{id: next_id, line: lptr, hash: hashcode}
 				next_id++
-
-			// found, and line is the same. reuse same id
-			case eq.hash == hashcode && compare_line(ll, eq.line):
-				ids[i] = eq.line_id
-
-			default:
+			} else if eq.hash == hashcode && compare_line(*lptr, *eq.line) {
+				// found, and line is the same. reuse same id
+				ids[i] = eq.id
+			} else {
 				// hash-collision. look through link-list for same match
 				n := eq.next
-				for ; n != nil; n = n.next {
-					if n.hash == hashcode && compare_line(ll, n.line) {
-						ids[i] = n.line_id
+				for n != nil {
+					if n.hash == hashcode && compare_line(*lptr, *n.line) {
+						ids[i] = n.id
 						break
 					}
+					n = n.next
 				}
 				// new entry, link to start of linked-list
 				if n == nil {
-					eq.next = &EquivClass{line_id: next_id, line: ll, hash: hashcode, next: eq.next}
 					ids[i] = next_id
+					eq.next = &EquivClass{id: next_id, line: lptr, hash: hashcode, next: eq.next}
 					next_id++
 				}
 			}
@@ -1404,8 +1414,8 @@ func compress_equiv_ids(lines1, lines2 *LinesData, max_id1, max_id2 int) {
 	lines1.zids_start, lines1.zids_end = i1, j1
 	lines2.zids_start, lines2.zids_end = i2, j2
 
-	// Go through all lines, replace chunk  lines that does not exists in the 
-	// other set with a single entry and a new id).
+	// Go through all lines, replace chunk of lines that does not exists in the 
+	// other set with a single entry and a negative new id).
 	next_id := max_int(max_id1, max_id2) + 1
 	for f := 0; f < 2; f++ {
 		var ids []int
@@ -1424,7 +1434,7 @@ func compress_equiv_ids(lines1, lines2 *LinesData, max_id1, max_id2 int) {
 
 		// new slices for compressed ids and the number of lines each entry replaced
 		// use a new negative id for those merged lines
-		zlines := make([]int, len(ids))
+		zcount := make([]int, len(ids))
 		zids := make([]int, len(ids))
 
 		lastexclude := false
@@ -1432,15 +1442,15 @@ func compress_equiv_ids(lines1, lines2 *LinesData, max_id1, max_id2 int) {
 		for _, v := range ids {
 			exclude := (v > max_id || !has_ids[v])
 			if exclude && lastexclude {
-				zlines[n-1]++
+				zcount[n-1]++
 				zids[n-1] = -next_id
 				next_id++
 			} else if exclude {
-				zlines[n]++
+				zcount[n]++
 				zids[n] = -v
 				n++
 			} else {
-				zlines[n]++
+				zcount[n]++
 				zids[n] = v
 				n++
 			}
@@ -1449,14 +1459,14 @@ func compress_equiv_ids(lines1, lines2 *LinesData, max_id1, max_id2 int) {
 
 		// shrink the slice
 		zids = zids[:n]
-		zlines = zlines[:n]
+		zcount = zcount[:n]
 
 		if f == 0 {
 			lines1.zids = zids
-			lines1.zlines = zlines
+			lines1.zcount = zcount
 		} else {
 			lines2.zids = zids
-			lines2.zlines = zlines
+			lines2.zcount = zcount
 		}
 	}
 }
@@ -1487,9 +1497,9 @@ func expand_change_list(info1, info2 *LinesData, zchange1, zchange2 []bool) {
 			continue
 		}
 
-		// expand each entry by the number of lines in zlines[]
+		// expand each entry by the number of lines in zcount[]
 		n := 0
-		for i, m := range info.zlines {
+		for i, m := range info.zcount {
 			if zchange[i] {
 				for j := 0; j < m; j, n = j+1, n+1 {
 					change[n] = true
@@ -1543,6 +1553,9 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 		fdata := make([]byte, fsize, fsize)
 		n, err := file.osfile.Read(fdata)
 		if err != nil {
+			file.osfile.Close()
+			file.osfile = nil
+			file.data = nil
 			file.errormsg = err.Error()
 			return file
 		}
@@ -1560,8 +1573,8 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 //
 func (file *Filedata) split_lines() [][]byte {
 
-	lines := make([][]byte, 0, len(file.data)/20+10)
-	previ := 0
+	lines := make([][]byte, 0, min_int(len(file.data)/32, 500))
+	var previ int
 	var lastb byte
 
 	data := file.data
@@ -1738,18 +1751,16 @@ func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 
 		var msg1, msg2 string
 
-		switch {
-		case file1.is_binary && file2.is_binary:
-			// compare binary file
-			if len(file1.data) != len(file2.data) || !bytes.Equal(file1.data, file2.data) {
-				msg1, msg2 = MSG_BIN_FILE_DIFFERS, MSG_BIN_FILE_DIFFERS
-			}
+		if file1.is_binary {
+			msg1 = MSG_BIN_FILE_DIFFERS
+		} else {
+			msg1 = MSG_FILE_DIFFERS
+		}
 
-		case file1.is_binary:
-			msg1 = file1.errormsg
-
-		case file2.is_binary:
-			msg2 = file1.errormsg
+		if file2.is_binary {
+			msg2 = MSG_BIN_FILE_DIFFERS
+		} else {
+			msg2 = MSG_FILE_DIFFERS
 		}
 
 		if msg1 != "" || msg2 != "" {

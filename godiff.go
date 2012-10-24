@@ -59,24 +59,41 @@ import (
 	"unicode/utf8"
 )
 
-const VERSION = "0.01"
+const (
+	// Version number
+	VERSION = "0.01"
 
-// Scan at up to this size in file for '\0' in test for binary file
-const BINARY_CHECK_SIZE = 65536
+	// Scan at up to this size in file for '\0' in test for binary file
+	BINARY_CHECK_SIZE = 65536
 
-// Output buffer size
-const OUTPUT_BUF_SIZE = 65536
+	// Output buffer size
+	OUTPUT_BUF_SIZE = 65536
 
-// default number of context lines to display
-const CONTEXT_LINES = 3
+	// default number of context lines to display
+	CONTEXT_LINES = 3
 
-// convenient shortcut
-const PATH_SEPARATOR = string(os.PathSeparator)
+	// convenient shortcut
+	PATH_SEPARATOR = string(os.PathSeparator)
 
-// use mmap for file greather than this size, for smaller files just use Read() instead.
-const MMAP_THRESHOLD = 8 * 1024
+	// use mmap for file greather than this size, for smaller files just use Read() instead.
+	MMAP_THRESHOLD = 8 * 1024
+)
 
-// Mmap'ed file 
+// Error Messages
+const (
+	MSG_FILE_SIZE_ZERO   = "File has size 0"
+	MSG_FILE_NOT_EXISTS  = "File does not exist"
+	MSG_DIR_NOT_EXISTS   = "Directory does not exist"
+	MSG_FILE_IS_BINARY   = "This is a binary file"
+	MSG_FILE_DIFFERS     = "File differs"
+	MSG_BIN_FILE_DIFFERS = "File differs. This is a binary file"
+	MSG_FILE_IDENTICAL   = "Files are the same"
+	MSG_FILE_TOO_BIG     = "File too big"
+	MSG_THIS_IS_DIR      = "This is a directory"
+	MSG_THIS_IS_FILE     = "This is a file"
+)
+
+// file data
 type Filedata struct {
 	name      string
 	info      os.FileInfo
@@ -88,7 +105,7 @@ type Filedata struct {
 }
 
 // Callback funcs for diff.
-// The actual callbaks are implemented with function closures to enable it ot access private data
+// The actual callbaks are implemented with function closures
 type DiffAction struct {
 	diff_same   func(int, int, int, int)
 	diff_modify func(int, int, int, int)
@@ -105,20 +122,6 @@ type OutputFormat struct {
 	fileinfo1, fileinfo2   os.FileInfo
 	header_printed         bool
 }
-
-// Error Messages
-const (
-	MSG_FILE_SIZE_ZERO   = "File has size 0"
-	MSG_FILE_NOT_EXISTS  = "File does not exist"
-	MSG_DIR_NOT_EXISTS   = "Directory does not exist"
-	MSG_FILE_IS_BINARY   = "This is a binary file"
-	MSG_FILE_DIFFERS     = "File differs"
-	MSG_BIN_FILE_DIFFERS = "File differs. This is a binary file"
-	MSG_FILE_IDENTICAL   = "Files are the same"
-	MSG_FILE_TOO_BIG     = "File too big"
-	MSG_THIS_IS_DIR      = "This is a directory"
-	MSG_THIS_IS_FILE     = "This is a file"
-)
 
 const HTML_HEADER = `<!doctype html><html><head>
 <meta http-equiv="content-type" content="text/html;charset=utf-8">`
@@ -157,19 +160,21 @@ const HTML_LEGEND = `<br><b>Legend:</b><br><table class="tab">
 `
 
 // command line arguments
-var flag_pprof_file string
-var flag_version bool = false
-var flag_cmp_ignore_case bool = false
-var flag_cmp_ignore_blank_lines bool = false
-var flag_cmp_ignore_space_change bool = false
-var flag_cmp_ignore_all_space bool = false
-var flag_unicode_case_and_space bool = false
-var flag_show_identical_files bool = false
-var flag_suppress_line_changes bool = false
-var flag_suppress_missing_file bool = false
-var flag_output_as_text bool = false
-var flag_context_lines int = CONTEXT_LINES
-var flag_max_goroutines = 1
+var (
+	flag_pprof_file              string
+	flag_version                 bool = false
+	flag_cmp_ignore_case         bool = false
+	flag_cmp_ignore_blank_lines  bool = false
+	flag_cmp_ignore_space_change bool = false
+	flag_cmp_ignore_all_space    bool = false
+	flag_unicode_case_and_space  bool = false
+	flag_show_identical_files    bool = false
+	flag_suppress_line_changes   bool = false
+	flag_suppress_missing_file   bool = false
+	flag_output_as_text          bool = false
+	flag_context_lines           int  = CONTEXT_LINES
+	flag_max_goroutines               = 1
+)
 
 // Job queue for goroutines
 type JobQueue struct {
@@ -178,19 +183,34 @@ type JobQueue struct {
 }
 
 // Queue queue for goroutines diff_file
-var job_queue chan JobQueue
-var job_wait sync.WaitGroup
+var (
+	job_queue chan JobQueue
+	job_wait  sync.WaitGroup
+)
 
 // buffered stdout.
-var out = bufio.NewWriterSize(os.Stdout, OUTPUT_BUF_SIZE)
-var out_lock sync.Mutex
+var (
+	out      = bufio.NewWriterSize(os.Stdout, OUTPUT_BUF_SIZE)
+	out_lock sync.Mutex
+)
 
 // html entity strings
-var html_entity_amp = html.EscapeString("&")
-var html_entity_gt = html.EscapeString(">")
-var html_entity_lt = html.EscapeString("<")
-var html_entity_single_quote = html.EscapeString("'")
-var html_entity_double_quote = html.EscapeString("\"")
+var (
+	html_entity_amp    = html.EscapeString("&")
+	html_entity_gt     = html.EscapeString(">")
+	html_entity_lt     = html.EscapeString("<")
+	html_entity_squote = html.EscapeString("'")
+	html_entity_dquote = html.EscapeString("\"")
+)
+
+// functions to compare line and computer hash values,
+// these will be setup based on flags: -b -w -U etc.
+var (
+	compare_line func([]byte, []byte) bool
+	compute_hash func([]byte) uint32
+)
+
+var blank_line = make([]byte, 0)
 
 func version() {
 	fmt.Printf("godiff. Version %s\n", VERSION)
@@ -210,11 +230,6 @@ func usage(msg string) {
 func usage0() {
 	usage("")
 }
-
-// functions to compare line and computer hash values,
-// these will be setup based on flags: -b -w -U etc.
-var compare_line func([]byte, []byte) bool
-var compute_hash func([]byte) uint32
 
 // Main routine.
 func main() {
@@ -431,28 +446,26 @@ func to_lower_byte(b byte) byte {
 	return b
 }
 
-// split text into array of individual rune, and another array for comparison.
-func split_runes(s []byte) ([]rune, []int) {
+// split text into array of individual rune position, and another array for comparison.
+func split_runes(s []byte) ([]int, []int) {
 
-	lens := len(s)
-	data := make([]rune, lens)
-	cmp := make([]int, lens)
+	pos := make([]int, len(s)+1)
+	cmp := make([]int, len(s))
 
-	i, n := 0, 0
-	var r rune
-	var h int
+	var h, i, n int
 
-	for i < lens {
-		if s[i] < utf8.RuneSelf {
-			r = rune(s[i])
+	for i < len(s) {
+		pos[n] = i
+		b := s[i]
+		if b < utf8.RuneSelf {
 			if flag_cmp_ignore_case {
 				if flag_unicode_case_and_space {
-					h = int(unicode.ToLower(r))
+					h = int(unicode.ToLower(rune(b)))
 				} else {
-					h = int(to_lower_byte(byte(r)))
+					h = int(to_lower_byte(b))
 				}
 			} else {
-				h = int(r)
+				h = int(b)
 			}
 			i++
 		} else {
@@ -464,33 +477,11 @@ func split_runes(s []byte) ([]rune, []int) {
 			}
 			i += rsize
 		}
-
-		data[n], cmp[n] = r, h
+		cmp[n] = h
 		n = n + 1
 	}
-	return data[:n], cmp[:n]
-}
-
-func write_html_rune(buf *bytes.Buffer, r rune) {
-
-	if r < utf8.RuneSelf {
-		switch r {
-		case '<':
-			buf.WriteString(html_entity_lt)
-		case '>':
-			buf.WriteString(html_entity_gt)
-		case '&':
-			buf.WriteString(html_entity_amp)
-		case '\'':
-			buf.WriteString(html_entity_single_quote)
-		case '"':
-			buf.WriteString(html_entity_double_quote)
-		default:
-			buf.WriteByte(byte(r))
-		}
-	} else {
-		buf.WriteRune(r)
-	}
+	pos[n] = i
+	return pos[:n+1], cmp[:n]
 }
 
 //
@@ -499,44 +490,29 @@ func write_html_rune(buf *bytes.Buffer, r rune) {
 //
 func write_html_bytes(buf *bytes.Buffer, line []byte) {
 
-	var v rune
-	var size int
-	var esc string = ""
-
-	i := 0
+	esc := ""
 	lasti := 0
-	llen := len(line)
 
-	for i < llen {
-		v = rune(line[i])
-		if v < utf8.RuneSelf {
-			size = 1
-			switch v {
-			case '<':
-				esc = html_entity_lt
-			case '>':
-				esc = html_entity_gt
-			case '&':
-				esc = html_entity_amp
-			case '\'':
-				esc = html_entity_single_quote
-			case '"':
-				esc = html_entity_double_quote
-			}
-		} else {
-			v, size = utf8.DecodeRune(line[i:])
+	for i, v := range line {
+		switch v {
+		case '<':
+			esc = html_entity_lt
+		case '>':
+			esc = html_entity_gt
+		case '&':
+			esc = html_entity_amp
+		case '\'':
+			esc = html_entity_squote
+		case '"':
+			esc = html_entity_dquote
 		}
 
 		if esc != "" {
-			if lasti < i {
-				buf.Write(line[lasti:i])
-			}
-			lasti = i + size
+			buf.Write(line[lasti:i])
 			buf.WriteString(esc)
 			esc = ""
+			lasti = i + 1
 		}
-
-		i += size
 	}
 
 	buf.Write(line[lasti:])
@@ -770,8 +746,11 @@ func diff_html_modify(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1,
 
 		} else {
 
-			rline1, rcmp1 := split_runes(data1[start1])
-			rline2, rcmp2 := split_runes(data2[start2])
+			line1 := data1[start1]
+			line2 := data2[start2]
+
+			rpos1, rcmp1 := split_runes(line1)
+			rpos2, rcmp2 := split_runes(line2)
 
 			change1, change2 := do_diff(rcmp1, rcmp2)
 
@@ -785,31 +764,19 @@ func diff_html_modify(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1,
 
 				action.diff_insert = func(start1, end1, start2, end2 int) {
 					outfmt.buf2.WriteString("<span class=\"chg\">")
-					for start2 < end2 {
-						write_html_rune(&outfmt.buf2, rline2[start2])
-						start2++
-					}
+					write_html_bytes(&outfmt.buf2, line2[rpos2[start2]:rpos2[end2]])
 					outfmt.buf2.WriteString("</span>")
 				}
 
 				action.diff_remove = func(start1, end1, sart2, end2 int) {
 					outfmt.buf1.WriteString("<span class=\"chg\">")
-					for start1 < end1 {
-						write_html_rune(&outfmt.buf1, rline1[start1])
-						start1++
-					}
+					write_html_bytes(&outfmt.buf1, line1[rpos1[start1]:rpos1[end1]])
 					outfmt.buf1.WriteString("</span>")
 				}
 
 				action.diff_same = func(start1, end1, start2, end2 int) {
-					for start1 < end1 {
-						write_html_rune(&outfmt.buf1, rline1[start1])
-						start1++
-					}
-					for start2 < end2 {
-						write_html_rune(&outfmt.buf2, rline2[start2])
-						start2++
-					}
+					write_html_bytes(&outfmt.buf1, line1[rpos1[start1]:rpos1[end1]])
+					write_html_bytes(&outfmt.buf2, line2[rpos2[start2]:rpos2[end2]])
 				}
 
 				report_changes(&action, rcmp1, rcmp2, change1, change2)
@@ -1115,7 +1082,7 @@ func hash32(h uint32, b byte) uint32 {
 }
 
 func compute_hash_exact(data []byte) uint32 {
-	var h uint32 = fnv_offset32
+	h := uint32(fnv_offset32)
 	for _, v := range data {
 		h = hash32(h, v)
 	}
@@ -1123,7 +1090,7 @@ func compute_hash_exact(data []byte) uint32 {
 }
 
 func compute_hash_bytes(line1 []byte) uint32 {
-	var hash uint32 = fnv_offset32
+	 hash := uint32(fnv_offset32)
 
 	switch {
 	case flag_cmp_ignore_all_space:
@@ -1165,7 +1132,7 @@ func compute_hash_bytes(line1 []byte) uint32 {
 }
 
 func compute_hash_unicode(line1 []byte) uint32 {
-	var hash uint32 = fnv_offset32
+	 hash  := uint32(fnv_offset32)
 
 	i, len1 := 0, len(line1)
 
@@ -1238,7 +1205,6 @@ type LinesData struct {
 	zids_end   int
 }
 
-var blank_line = make([]byte, 0)
 
 //
 // Compute id's that represent the original lines, these numeric id's are use for faster line comparison.
@@ -1568,17 +1534,33 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 	return file
 }
 
+func (file *Filedata) check_binary() {
+	if file.data == nil {
+		return
+	}
+	if len(file.data) == 0 {
+		file.data = nil
+		file.errormsg = MSG_FILE_SIZE_ZERO
+		return
+	}
+	if bytes.IndexByte(file.data[0:min_int(len(file.data), BINARY_CHECK_SIZE)], 0) >= 0 {
+		file.data = nil
+		file.errormsg = MSG_FILE_IS_BINARY
+		return
+	}
+}
+
 //
 // split up data into text lines
 //
 func (file *Filedata) split_lines() [][]byte {
 
 	lines := make([][]byte, 0, min_int(len(file.data)/32, 500))
-	var previ int
-	var lastb byte
+	var i, previ int
+	var b, lastb byte
 
 	data := file.data
-	for i, b := range data {
+	for i, b = range data {
 		// accept dos, unix, mac newline
 		if b == '\n' && lastb == '\r' {
 			previ = i + 1
@@ -1698,6 +1680,7 @@ func diff_dirs(dirname1, dirname2 string, finfo1, finfo2 os.FileInfo) {
 						output_diff_message(dirname1+PATH_SEPARATOR+name1, dirname2+PATH_SEPARATOR+name1, dir1[i1], nil, "", MSG_FILE_NOT_EXISTS, true)
 					} else {
 						fdata := open_file(dirname1+PATH_SEPARATOR+name1, dir1[i1])
+						fdata.check_binary()
 						output_diff_message_content(dirname1+PATH_SEPARATOR+name1, dirname2+PATH_SEPARATOR+name1, dir1[i1], nil, fdata.errormsg, MSG_FILE_NOT_EXISTS, fdata.data, nil, true)
 						fdata.close_file()
 					}
@@ -1711,6 +1694,7 @@ func diff_dirs(dirname1, dirname2 string, finfo1, finfo2 os.FileInfo) {
 						output_diff_message(dirname1+PATH_SEPARATOR+name2, dirname2+PATH_SEPARATOR+name2, nil, dir2[i2], MSG_FILE_NOT_EXISTS, "", true)
 					} else {
 						fdata := open_file(dirname2+PATH_SEPARATOR+name2, dir2[i2])
+						fdata.check_binary()
 						output_diff_message_content(dirname1+PATH_SEPARATOR+name2, dirname2+PATH_SEPARATOR+name2, nil, dir2[i2], MSG_FILE_NOT_EXISTS, fdata.errormsg, nil, fdata.data, true)
 						fdata.close_file()
 					}

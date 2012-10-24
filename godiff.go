@@ -188,7 +188,7 @@ var (
 	job_wait  sync.WaitGroup
 )
 
-// buffered stdout.
+// Buffered stdout
 var (
 	out      = bufio.NewWriterSize(os.Stdout, OUTPUT_BUF_SIZE)
 	out_lock sync.Mutex
@@ -292,8 +292,14 @@ func main() {
 		usage("Missing files")
 	}
 
-	// check file type
+	if len(args) > 2 {
+		usage("Too many files")
+	}
+
+	// get the directory name or filename
 	file1, file2 := args[0], args[1]
+
+	// check file type
 	finfo1, err1 := os.Stat(file1)
 	finfo2, err2 := os.Stat(file2)
 
@@ -316,8 +322,7 @@ func main() {
 		out.WriteString(HTML_HEADER)
 		fmt.Fprintf(out, "<title>Compare %s vs %s</title>\n", html.EscapeString(file1), html.EscapeString(file2))
 		out.WriteString(HTML_CSS)
-		out.WriteString("</head>")
-		out.WriteString("<body>\n")
+		out.WriteString("</head><body>\n")
 		fmt.Fprintf(out, "<h1>Compare %s vs %s</h1><br>\n", html.EscapeString(file1), html.EscapeString(file2))
 	}
 
@@ -334,8 +339,7 @@ func main() {
 	if !flag_output_as_text {
 		fmt.Fprintf(out, "Generated on %s<br>", time.Now().Format(time.RFC1123))
 		out.WriteString(HTML_LEGEND)
-		out.WriteString("</body>")
-		out.WriteString("</html>\n")
+		out.WriteString("</body></html>\n")
 	}
 }
 
@@ -587,21 +591,18 @@ func html_add_block(outfmt *OutputFormat) {
 		if !outfmt.header_printed {
 			out_acquire_lock()
 			outfmt.header_printed = true
-			out.WriteString("<table class=\"tab\">\n")
-			out.WriteString("<tr><td class=\"tth\"><span class=\"hdr\">")
+			out.WriteString("<table class=\"tab\"><tr><td class=\"tth\"><span class=\"hdr\">")
 			out.WriteString(html.EscapeString(outfmt.name1))
 			out.WriteString("</span>")
 			if outfmt.fileinfo1 != nil {
-				fmt.Fprintf(out, "<br><span class=\"inf\">%d", outfmt.fileinfo1.Size())
-				fmt.Fprintf(out, " %s</span>", outfmt.fileinfo1.ModTime().Format(time.RFC1123))
+				fmt.Fprintf(out, "<br><span class=\"inf\">%d %s</span>", outfmt.fileinfo1.Size(), outfmt.fileinfo1.ModTime().Format(time.RFC1123))
 			}
 
 			out.WriteString("</td><td class=\"tth\"><span class=\"hdr\">")
 			out.WriteString(html.EscapeString(outfmt.name2))
 			out.WriteString("</span>")
 			if outfmt.fileinfo2 != nil {
-				fmt.Fprintf(out, "<br><span class=\"inf\">%d", outfmt.fileinfo2.Size())
-				fmt.Fprintf(out, " %s</span>", outfmt.fileinfo2.ModTime().Format(time.RFC1123))
+				fmt.Fprintf(out, "<br><span class=\"inf\">%d %s</span>", outfmt.fileinfo2.Size(), outfmt.fileinfo2.ModTime().Format(time.RFC1123))
 			}
 			out.WriteString("</td></tr>")
 		}
@@ -822,8 +823,7 @@ func diff_text_header(outfmt *OutputFormat) {
 	if !outfmt.header_printed {
 		out_acquire_lock()
 		outfmt.header_printed = true
-		fmt.Fprintf(out, "#< %s\n", outfmt.name1)
-		fmt.Fprintf(out, "#> %s\n", outfmt.name2)
+		fmt.Fprintf(out, "#< %s\n#> %s\n", outfmt.name1, outfmt.name2)
 	}
 }
 
@@ -843,14 +843,14 @@ func diff_text_modify(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1,
 	for start1 < end1 {
 		out.WriteString("< ")
 		out.Write(data1[start1])
-		out.WriteString("\n")
+		out.WriteByte('\n')
 		start1++
 	}
 	out.WriteString("---\n")
 	for start2 < end2 {
 		out.WriteString("> ")
 		out.Write(data2[start2])
-		out.WriteString("\n")
+		out.WriteByte('\n')
 		start2++
 	}
 }
@@ -866,7 +866,7 @@ func diff_text_insert(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1,
 	for start2 < end2 {
 		out.WriteString("> ")
 		out.Write(data2[start2])
-		out.WriteString("\n")
+		out.WriteByte('\n')
 		start2++
 	}
 }
@@ -881,11 +881,12 @@ func diff_text_remove(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1,
 	for start1 < end1 {
 		out.WriteString("< ")
 		out.Write(data1[start1])
-		out.WriteString("\n")
+		out.WriteByte('\n')
 		start1++
 	}
 }
 
+// Close file (and umap it)
 func (file *Filedata) close_file() {
 	if file.osfile != nil {
 		if file.is_mapped && file.data != nil {
@@ -898,11 +899,7 @@ func (file *Filedata) close_file() {
 }
 
 func is_space(b byte) bool {
-	switch b {
-	case ' ', '\t', '\v', '\f':
-		return true
-	}
-	return false
+	return b == ' ' || b == '\t' || b == '\v' || b == '\f'
 }
 
 func get_next_rune_nonspace(line []byte, i int) (rune, int) {
@@ -1073,11 +1070,13 @@ func compare_line_unicode(line1, line2 []byte) bool {
 	return true
 }
 
-const fnv_offset32 = 2166136261
-const fnv_prime32 = 16777619
+// for FVN hash function
+const (
+	fnv_offset32 = 2166136261
+	fnv_prime32  = 16777619
+)
 
 func hash32(h uint32, b byte) uint32 {
-
 	return (h ^ uint32(b)) * fnv_prime32
 }
 
@@ -1090,8 +1089,7 @@ func compute_hash_exact(data []byte) uint32 {
 }
 
 func compute_hash_bytes(line1 []byte) uint32 {
-	 hash := uint32(fnv_offset32)
-
+	hash := uint32(fnv_offset32)
 	switch {
 	case flag_cmp_ignore_all_space:
 		for _, v1 := range line1 {
@@ -1132,8 +1130,7 @@ func compute_hash_bytes(line1 []byte) uint32 {
 }
 
 func compute_hash_unicode(line1 []byte) uint32 {
-	 hash  := uint32(fnv_offset32)
-
+	hash := uint32(fnv_offset32)
 	i, len1 := 0, len(line1)
 
 	switch {
@@ -1204,7 +1201,6 @@ type LinesData struct {
 	zids_start int
 	zids_end   int
 }
-
 
 //
 // Compute id's that represent the original lines, these numeric id's are use for faster line comparison.

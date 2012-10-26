@@ -104,15 +104,6 @@ type Filedata struct {
 	data      []byte
 }
 
-// Callback funcs for diff.
-// The actual callbaks are implemented with function closures
-type DiffAction struct {
-	diff_same   func(int, int, int, int)
-	diff_modify func(int, int, int, int)
-	diff_insert func(int, int, int, int)
-	diff_remove func(int, int, int, int)
-}
-
 // Output to diff as html or text format
 type OutputFormat struct {
 	line1_start, line1_end int
@@ -121,6 +112,33 @@ type OutputFormat struct {
 	name1, name2           string
 	fileinfo1, fileinfo2   os.FileInfo
 	header_printed         bool
+}
+
+// Interface for diff report_change() callbacks.
+type DiffChanger interface {
+	diff_same(int, int, int, int)
+	diff_modify(int, int, int, int)
+	diff_insert(int, int, int, int)
+	diff_remove(int, int, int, int)
+}
+
+// For changes within a line
+type DiffChangeLine struct {
+	outfmt       *OutputFormat
+	line1, line2 []byte
+	pos1, pos2   []int
+}
+
+// changes to be output in Text format
+type DiffChangeFileText struct {
+	outfmt       *OutputFormat
+	file1, file2 [][]byte
+}
+
+// changes to be output in Html format
+type DiffChangeFileHtml struct {
+	outfmt       *OutputFormat
+	file1, file2 [][]byte
 }
 
 const HTML_HEADER = `<!doctype html><html><head>
@@ -269,7 +287,6 @@ func main() {
 	// flush output on termination
 	defer func() {
 		out.Flush()
-		out = nil
 	}()
 
 	// choose which compare and hash function to use
@@ -361,9 +378,9 @@ func do_diff(data1, data2 []int) ([]bool, []bool) {
 
 //
 // Report diff changes.
-// For each type of change, call the corresponding 'action' function
+// For each type of change, call the corresponding insert/modify/remove/same function
 //
-func report_changes(action *DiffAction, data1, data2 []int, change1, change2 []bool) bool {
+func report_changes(chg DiffChanger, data1, data2 []int, change1, change2 []bool) bool {
 	len1, len2 := len(change1), len(change2)
 	i1, i2 := 0, 0
 	changed := false
@@ -371,17 +388,18 @@ func report_changes(action *DiffAction, data1, data2 []int, change1, change2 []b
 	// scan for changes
 	for i1 < len1 || i2 < len2 {
 		switch {
+		// no change, advance both i1 and i2 to to next set of changes
 		case i1 < len1 && i2 < len2 && !change1[i1] && !change2[i2]:
 			s1, s2 := i1+1, i2+1
 			for s1 < len1 && s2 < len2 && !change1[s1] && !change2[s2] {
 				s1, s2 = s1+1, s2+1
 			}
-			if action.diff_same != nil {
-				action.diff_same(i1, s1, i2, s2)
-			}
+			chg.diff_same(i1, s1, i2, s2)
 			i1, i2 = s1, s2
 
-		case i1 < len1 && i2 < len2 && change1[i1] && change2[i2] && action.diff_modify != nil:
+		// change in both lists
+		case i1 < len1 && i2 < len2 && change1[i1] && change2[i2]:
+			// find the end of this changes segment
 			s1, s2 := i1+1, i2+1
 			for s1 < len1 && change1[s1] {
 				s1++
@@ -389,20 +407,23 @@ func report_changes(action *DiffAction, data1, data2 []int, change1, change2 []b
 			for s2 < len2 && change2[s2] {
 				s2++
 			}
+
+			// skip blank lines in the begining of the changes
 			for i1 < s1 && data1[i1] == 0 {
 				i1++
 			}
 			for i2 < s2 && data2[i2] == 0 {
 				i2++
 			}
+
 			if i1 < s1 && i2 < s2 {
-				action.diff_modify(i1, s1, i2, s2)
+				chg.diff_modify(i1, s1, i2, s2)
 				changed = true
 			} else if i1 < s1 {
-				action.diff_remove(i1, s1, i2, i2)
+				chg.diff_remove(i1, s1, i2, i2)
 				changed = true
 			} else if i2 < s2 {
-				action.diff_insert(i1, i1, i2, s2)
+				chg.diff_insert(i1, i1, i2, s2)
 				changed = true
 			}
 			i1, i2 = s1, s2
@@ -416,7 +437,7 @@ func report_changes(action *DiffAction, data1, data2 []int, change1, change2 []b
 				i1++
 			}
 			if i1 < s1 {
-				action.diff_remove(i1, s1, i2, i2)
+				chg.diff_remove(i1, s1, i2, i2)
 				changed = true
 			}
 			i1 = s1
@@ -430,7 +451,7 @@ func report_changes(action *DiffAction, data1, data2 []int, change1, change2 []b
 				i2++
 			}
 			if i2 < s2 {
-				action.diff_insert(i1, i1, i2, s2)
+				chg.diff_insert(i1, i1, i2, s2)
 				changed = true
 			}
 			i2 = s2
@@ -633,31 +654,24 @@ func html_add_context_lines(outfmt *OutputFormat, data1, data2 [][]byte, line1, 
 
 	// Add 'context' lines after the last 'diff' and before this 'diff' segment
 	if outfmt.line1_end > 0 || outfmt.line2_end > 0 {
-		end1 = outfmt.line1_end + flag_context_lines
-		end2 = outfmt.line2_end + flag_context_lines
-
-		if end1 > len(data1) {
-			end1 = len(data1)
-		}
-		if end2 > len(data2) {
-			end2 = len(data2)
-		}
+		end1 = min_int(len(data1), outfmt.line1_end+flag_context_lines)
+		end2 = min_int(len(data2), outfmt.line2_end+flag_context_lines)
 
 		if end1 < line1 && end2 < line2 {
 			outfmt.buf1.WriteString("<span class=\"nop\">")
-			for end1 > outfmt.line1_end {
-				write_html_bytes(&outfmt.buf1, data1[outfmt.line1_end])
+			for _, line := range data1[outfmt.line1_end:end1] {
+				write_html_bytes(&outfmt.buf1, line)
 				outfmt.buf1.WriteByte('\n')
-				outfmt.line1_end++
 			}
+			outfmt.line1_end = end1
 			outfmt.buf1.WriteString("</span>")
 
 			outfmt.buf2.WriteString("<span class=\"nop\">")
-			for end2 > outfmt.line2_end {
-				write_html_bytes(&outfmt.buf2, data2[outfmt.line2_end])
+			for _, line := range data2[outfmt.line2_end:end2] {
+				write_html_bytes(&outfmt.buf2, line)
 				outfmt.buf2.WriteByte('\n')
-				outfmt.line2_end++
 			}
+			outfmt.line2_end = end2
 			outfmt.buf2.WriteString("</span>")
 		}
 	}
@@ -686,53 +700,53 @@ func html_add_context_lines(outfmt *OutputFormat, data1, data2 [][]byte, line1, 
 
 	if line1 > outfmt.line1_end {
 		outfmt.buf1.WriteString("<span class=\"nop\">")
-		for line1 > outfmt.line1_end {
-			write_html_bytes(&outfmt.buf1, data1[outfmt.line1_end])
+		for _, line := range data1[outfmt.line1_end:line1] {
+			write_html_bytes(&outfmt.buf1, line)
 			outfmt.buf1.WriteByte('\n')
-			outfmt.line1_end++
 		}
+		outfmt.line1_end = line1
 		outfmt.buf1.WriteString("</span>")
 	}
 
 	if line2 > outfmt.line2_end {
 		outfmt.buf2.WriteString("<span class=\"nop\">")
-		for line2 > outfmt.line2_end {
-			write_html_bytes(&outfmt.buf2, data2[outfmt.line2_end])
+		for _, line := range data2[outfmt.line2_end:line2] {
+			write_html_bytes(&outfmt.buf2, line)
 			outfmt.buf2.WriteByte('\n')
-			outfmt.line2_end++
 		}
+		outfmt.line2_end = line2
 		outfmt.buf2.WriteString("</span>")
 	}
 }
 
-func diff_html_insert(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1, start2, end2 int) {
-
-	html_add_context_lines(outfmt, data1, data2, start1, start2)
-	outfmt.buf2.WriteString("<span class=\"add\">")
-	for start2 < end2 {
-		write_html_bytes(&outfmt.buf2, data2[start2])
-		outfmt.buf2.WriteByte('\n')
-		start2++
-	}
-	outfmt.buf2.WriteString("</span>")
-	outfmt.line2_end = end2
+func (chg *DiffChangeFileHtml) diff_same(start1, end1, start2, end2 int) {
 }
 
-func diff_html_remove(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1, start2, end2 int) {
-
-	html_add_context_lines(outfmt, data1, data2, start1, start2)
-	outfmt.buf1.WriteString("<span class=\"del\">")
-	for start1 < end1 {
-		write_html_bytes(&outfmt.buf1, data1[start1])
-		outfmt.buf1.WriteByte('\n')
-		start1++
+func (chg *DiffChangeFileHtml) diff_insert(start1, end1, start2, end2 int) {
+	html_add_context_lines(chg.outfmt, chg.file1, chg.file2, start1, start2)
+	chg.outfmt.buf2.WriteString("<span class=\"add\">")
+	for _, line := range chg.file2[start2:end2] {
+		write_html_bytes(&chg.outfmt.buf2, line)
+		chg.outfmt.buf2.WriteByte('\n')
 	}
-	outfmt.buf1.WriteString("</span>")
-	outfmt.line1_end = end1
+	chg.outfmt.buf2.WriteString("</span>")
+	chg.outfmt.line2_end = end2
 }
 
-func diff_html_modify(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1, start2, end2 int) {
+func (chg *DiffChangeFileHtml) diff_remove(start1, end1, start2, end2 int) {
+	html_add_context_lines(chg.outfmt, chg.file1, chg.file2, start1, start2)
+	chg.outfmt.buf1.WriteString("<span class=\"del\">")
+	for _, line := range chg.file1[start1:end1] {
+		write_html_bytes(&chg.outfmt.buf1, line)
+		chg.outfmt.buf1.WriteByte('\n')
+	}
+	chg.outfmt.buf1.WriteString("</span>")
+	chg.outfmt.line1_end = end1
+}
 
+func (chg *DiffChangeFileHtml) diff_modify(start1, end1, start2, end2 int) {
+
+	outfmt, data1, data2 := chg.outfmt, chg.file1, chg.file2
 	html_add_context_lines(outfmt, data1, data2, start1, start2)
 
 	outfmt.buf1.WriteString("<span class=\"upd\">")
@@ -741,52 +755,35 @@ func diff_html_modify(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1,
 	for start1 < end1 && start2 < end2 {
 
 		if flag_suppress_line_changes {
-
 			write_html_bytes(&outfmt.buf1, data1[start1])
 			write_html_bytes(&outfmt.buf2, data2[start2])
-
 		} else {
+			// report on changes within the line
+			line1, line2 := data1[start1], data2[start2]
+			pos1, cmp1 := split_runes(line1)
+			pos2, cmp2 := split_runes(line2)
 
-			line1 := data1[start1]
-			line2 := data2[start2]
-
-			rpos1, rcmp1 := split_runes(line1)
-			rpos2, rcmp2 := split_runes(line2)
-
-			change1, change2 := do_diff(rcmp1, rcmp2)
+			change1, change2 := do_diff(cmp1, cmp2)
 
 			if change1 != nil {
 
 				// perform shift boundaries, to make the changes more readable
-				shift_boundaries(rcmp1, change1, rune_bouundary_score)
-				shift_boundaries(rcmp2, change2, rune_bouundary_score)
+				shift_boundaries(cmp1, change1, rune_bouundary_score)
+				shift_boundaries(cmp2, change2, rune_bouundary_score)
 
-				action := DiffAction{}
-
-				action.diff_insert = func(start1, end1, start2, end2 int) {
-					outfmt.buf2.WriteString("<span class=\"chg\">")
-					write_html_bytes(&outfmt.buf2, line2[rpos2[start2]:rpos2[end2]])
-					outfmt.buf2.WriteString("</span>")
+				chg := DiffChangeLine{
+					outfmt: outfmt,
+					line1:  line1,
+					line2:  line2,
+					pos1:   pos1,
+					pos2:   pos2,
 				}
-
-				action.diff_remove = func(start1, end1, sart2, end2 int) {
-					outfmt.buf1.WriteString("<span class=\"chg\">")
-					write_html_bytes(&outfmt.buf1, line1[rpos1[start1]:rpos1[end1]])
-					outfmt.buf1.WriteString("</span>")
-				}
-
-				action.diff_same = func(start1, end1, start2, end2 int) {
-					write_html_bytes(&outfmt.buf1, line1[rpos1[start1]:rpos1[end1]])
-					write_html_bytes(&outfmt.buf2, line2[rpos2[start2]:rpos2[end2]])
-				}
-
-				report_changes(&action, rcmp1, rcmp2, change1, change2)
+				report_changes(&chg, cmp1, cmp2, change1, change2)
 			}
 		}
 
 		outfmt.buf1.WriteByte('\n')
 		outfmt.buf2.WriteByte('\n')
-
 		start1++
 		start2++
 	}
@@ -798,10 +795,9 @@ func diff_html_modify(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1,
 
 	if start1 < end1 {
 		outfmt.buf1.WriteString("<span class=\"del\">")
-		for start1 < end1 {
-			write_html_bytes(&outfmt.buf1, data1[start1])
+		for _, line := range data1[start1:end1] {
+			write_html_bytes(&outfmt.buf1, line)
 			outfmt.buf1.WriteByte('\n')
-			start1++
 		}
 		outfmt.buf1.WriteString("</span>")
 		outfmt.line1_end = end1
@@ -809,14 +805,35 @@ func diff_html_modify(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1,
 
 	if start2 < end2 {
 		outfmt.buf2.WriteString("<span class=\"add\">")
-		for start2 < end2 {
-			write_html_bytes(&outfmt.buf2, data2[start2])
+		for _, line := range data2[start2:end2] {
+			write_html_bytes(&outfmt.buf2, line)
 			outfmt.buf2.WriteByte('\n')
-			start2++
 		}
 		outfmt.buf2.WriteString("</span>")
 		outfmt.line2_end = end2
 	}
+}
+
+func (chg *DiffChangeLine) diff_insert(start1, end1, start2, end2 int) {
+	chg.outfmt.buf2.WriteString("<span class=\"chg\">")
+	write_html_bytes(&chg.outfmt.buf2, chg.line2[chg.pos2[start2]:chg.pos2[end2]])
+	chg.outfmt.buf2.WriteString("</span>")
+}
+
+func (chg *DiffChangeLine) diff_remove(start1, end1, start2, end2 int) {
+	chg.outfmt.buf1.WriteString("<span class=\"chg\">")
+	write_html_bytes(&chg.outfmt.buf1, chg.line1[chg.pos1[start1]:chg.pos1[end1]])
+	chg.outfmt.buf1.WriteString("</span>")
+}
+
+func (chg *DiffChangeLine) diff_modify(start1, end1, start2, end2 int) {
+	chg.diff_remove(start1, end1, start2, end2)
+	chg.diff_insert(start1, end1, start2, end2)
+}
+
+func (chg *DiffChangeLine) diff_same(start1, end1, start2, end2 int) {
+	write_html_bytes(&chg.outfmt.buf1, chg.line1[chg.pos1[start1]:chg.pos1[end1]])
+	write_html_bytes(&chg.outfmt.buf2, chg.line2[chg.pos2[start2]:chg.pos2[end2]])
 }
 
 func diff_text_header(outfmt *OutputFormat) {
@@ -827,8 +844,11 @@ func diff_text_header(outfmt *OutputFormat) {
 	}
 }
 
-func diff_text_modify(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1, start2, end2 int) {
-	diff_text_header(outfmt)
+func (chg *DiffChangeFileText) diff_same(start1, end1, start2, end2 int) {
+}
+
+func (chg *DiffChangeFileText) diff_modify(start1, end1, start2, end2 int) {
+	diff_text_header(chg.outfmt)
 	switch {
 	case end1-start1 == 1 && end2-start2 == 1:
 		fmt.Fprintf(out, "%dc%d\n", start1+1, start2+1)
@@ -840,49 +860,48 @@ func diff_text_modify(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1,
 		fmt.Fprintf(out, "%d,%dc%d,%d\n", start1+1, end1, start2+1, end2)
 	}
 
-	for start1 < end1 {
+	for _, line := range chg.file1[start1:end1] {
 		out.WriteString("< ")
-		out.Write(data1[start1])
+		out.Write(line)
 		out.WriteByte('\n')
-		start1++
 	}
+
 	out.WriteString("---\n")
-	for start2 < end2 {
+
+	for _, line := range chg.file2[start2:end2] {
 		out.WriteString("> ")
-		out.Write(data2[start2])
+		out.Write(line)
 		out.WriteByte('\n')
-		start2++
 	}
 }
 
-func diff_text_insert(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1, start2, end2 int) {
-	diff_text_header(outfmt)
+func (chg *DiffChangeFileText) diff_insert(start1, end1, start2, end2 int) {
+	diff_text_header(chg.outfmt)
 	if end2-start2 == 1 {
 		fmt.Fprintf(out, "%da%d\n", start1, start2+1)
 	} else {
 		fmt.Fprintf(out, "%da%d,%d\n", start1, start2+1, end2)
 	}
 
-	for start2 < end2 {
+	for _, line := range chg.file2[start2:end2] {
 		out.WriteString("> ")
-		out.Write(data2[start2])
+		out.Write(line)
 		out.WriteByte('\n')
-		start2++
 	}
 }
 
-func diff_text_remove(outfmt *OutputFormat, data1, data2 [][]byte, start1, end1, start2, end2 int) {
-	diff_text_header(outfmt)
+func (chg *DiffChangeFileText) diff_remove(start1, end1, start2, end2 int) {
+	diff_text_header(chg.outfmt)
 	if end1-start1 == 1 {
 		fmt.Fprintf(out, "%dd%d\n", start1+1, start2)
 	} else {
 		fmt.Fprintf(out, "%d,%dd%d\n", start1+1, end1, start2)
 	}
-	for start1 < end1 {
+
+	for _, line := range chg.file1[start1:end1] {
 		out.WriteString("< ")
-		out.Write(data1[start1])
+		out.Write(line)
 		out.WriteByte('\n')
-		start1++
 	}
 }
 
@@ -1240,11 +1259,11 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 	next_id := 1
 
 	// process both sets of lines
-	for f := 0; f < 2; f++ {
+	for findex := 0; findex < 2; findex++ {
 		var lines [][]byte
 		var ids []int
 
-		if f == 0 {
+		if findex == 0 {
 			lines = lines1
 			ids = info1.ids
 		} else {
@@ -1286,7 +1305,7 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 			}
 		}
 
-		if f == 0 {
+		if findex == 0 {
 			max_id_f1 = next_id - 1
 		} else {
 			max_id_f2 = next_id - 1
@@ -1356,15 +1375,14 @@ func compress_equiv_ids(lines1, lines2 *LinesData, max_id1, max_id2 int) {
 
 	// One of the list is now empty, no need to run diff algorithm for comparison.
 	// Just mark the remaining lines other list as changed.
-	switch {
-	case i1 == j1:
+	if i1 == j1 {
 		for i2 < j2 {
 			lines2.change[i2] = true
 			i2++
 		}
 		return
-
-	case i2 == j2:
+	}
+	if i2 == j2 {
 		for i1 < j1 {
 			lines1.change[i1] = true
 			i1++
@@ -1379,12 +1397,12 @@ func compress_equiv_ids(lines1, lines2 *LinesData, max_id1, max_id2 int) {
 	// Go through all lines, replace chunk of lines that does not exists in the 
 	// other set with a single entry and a negative new id).
 	next_id := max_int(max_id1, max_id2) + 1
-	for f := 0; f < 2; f++ {
+	for findex := 0; findex < 2; findex++ {
 		var ids []int
 		var has_ids []bool
 		var max_id int
 
-		if f == 0 {
+		if findex == 0 {
 			ids = lines1.ids[lines1.zids_start:lines1.zids_end]
 			has_ids = has_ids2
 			max_id = max_id2
@@ -1423,7 +1441,7 @@ func compress_equiv_ids(lines1, lines2 *LinesData, max_id1, max_id2 int) {
 		zids = zids[:n]
 		zcount = zcount[:n]
 
-		if f == 0 {
+		if findex == 0 {
 			lines1.zids = zids
 			lines1.zcount = zcount
 		} else {
@@ -1439,12 +1457,12 @@ func compress_equiv_ids(lines1, lines2 *LinesData, max_id1, max_id2 int) {
 //
 func expand_change_list(info1, info2 *LinesData, zchange1, zchange2 []bool) {
 
-	for f := 0; f < 2; f++ {
+	for findex := 0; findex < 2; findex++ {
 		var info *LinesData
 		var change, zchange []bool
 
 		// expand the changes into the range between zids_start and zids_end
-		if f == 0 {
+		if findex == 0 {
 			info = info1
 			change = info1.change[info1.zids_start:]
 			zchange = zchange1
@@ -1463,7 +1481,7 @@ func expand_change_list(info1, info2 *LinesData, zchange1, zchange2 []bool) {
 		n := 0
 		for i, m := range info.zcount {
 			if zchange[i] {
-				for j := 0; j < m; j, n = j+1, n+1 {
+				for end := n + m; n < end; n++ {
 					change[n] = true
 				}
 			} else {
@@ -1747,7 +1765,6 @@ func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 			output_diff_message(filename1, filename2, finfo1, finfo2, msg1, msg2, true)
 		}
 	} else {
-
 		// Compute equiv ids for each line.
 		info1, info2 := find_equiv_lines(lines1, lines2)
 
@@ -1765,57 +1782,46 @@ func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 		shift_boundaries(info1.ids, info1.change, nil)
 		shift_boundaries(info2.ids, info2.change, nil)
 
-		action := DiffAction{}
-
-		diffout := OutputFormat{
+		outfmt := OutputFormat{
 			name1:     filename1,
 			name2:     filename2,
 			fileinfo1: finfo1,
 			fileinfo2: finfo2,
 		}
 
-		// Use function closures here as callbacks, it maps the line number from 
-		// the comparison algorithm to the actual line lines
+		var chg DiffChanger
+
+		// Choose change output format: text or html
 		if flag_output_as_text {
-			// for output in text format
-			action.diff_insert = func(start1, end1, start2, end2 int) {
-				diff_text_insert(&diffout, lines1, lines2, start1, end1, start2, end2)
-			}
-			action.diff_modify = func(start1, end1, start2, end2 int) {
-				diff_text_modify(&diffout, lines1, lines2, start1, end1, start2, end2)
-			}
-			action.diff_remove = func(start1, end1, start2, end2 int) {
-				diff_text_remove(&diffout, lines1, lines2, start1, end1, start2, end2)
+			chg = &DiffChangeFileText{
+				outfmt: &outfmt,
+				file1:  lines1,
+				file2:  lines2,
 			}
 		} else {
-			// for output in html format
-			action.diff_insert = func(start1, end1, start2, end2 int) {
-				diff_html_insert(&diffout, lines1, lines2, start1, end1, start2, end2)
-			}
-			action.diff_modify = func(start1, end1, start2, end2 int) {
-				diff_html_modify(&diffout, lines1, lines2, start1, end1, start2, end2)
-			}
-			action.diff_remove = func(start1, end1, start2, end2 int) {
-				diff_html_remove(&diffout, lines1, lines2, start1, end1, start2, end2)
+			chg = &DiffChangeFileHtml{
+				outfmt: &outfmt,
+				file1:  lines1,
+				file2:  lines2,
 			}
 		}
 
 		// output diff results
-		changed := report_changes(&action, info1.ids, info2.ids, info1.change, info2.change)
+		changed := report_changes(chg, info1.ids, info2.ids, info1.change, info2.change)
 
 		if flag_output_as_text {
-			if diffout.header_printed {
-				diffout.header_printed = false
+			if outfmt.header_printed {
+				outfmt.header_printed = false
 				out_release_lock()
 			}
 		} else {
 			// output remaining lines of all files
-			html_add_context_lines(&diffout, lines1, lines2, len(lines1), len(lines2))
-			html_add_block(&diffout)
+			html_add_context_lines(&outfmt, lines1, lines2, len(lines1), len(lines2))
+			html_add_block(&outfmt)
 
-			if diffout.header_printed {
+			if outfmt.header_printed {
 				out.WriteString("</table><br>\n")
-				diffout.header_printed = false
+				outfmt.header_printed = false
 				out_release_lock()
 			}
 		}
@@ -1825,9 +1831,9 @@ func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 			output_diff_message(filename1, filename2, finfo1, finfo2, MSG_FILE_IDENTICAL, MSG_FILE_IDENTICAL, false)
 		}
 	}
-
 }
 
+// shortcut functions. hopefully will be inlined by compiler
 func abs_int(a int) int {
 	if a < 0 {
 		return -a
@@ -1835,6 +1841,7 @@ func abs_int(a int) int {
 	return a
 }
 
+// shortcut functions. hopefully will be inlined by compiler
 func max_int(a, b int) int {
 	if a < b {
 		return b
@@ -1842,6 +1849,7 @@ func max_int(a, b int) int {
 	return a
 }
 
+// shortcut functions. hopefully will be inlined by compiler
 func min_int(a, b int) int {
 	if a < b {
 		return a
@@ -1852,7 +1860,7 @@ func min_int(a, b int) int {
 //
 // An O(ND) Difference Algorithm: Find middle snake
 //
-func algorithm_sms(data1, data2 []int, v []int) (int, int) {
+func algorithm_sms(data1, data2 []int, v []int) (int, int, int, int) {
 
 	end1, end2 := len(data1), len(data2)
 	max := end1 + end2 + 1
@@ -1865,7 +1873,7 @@ func algorithm_sms(data1, data2 []int, v []int) (int, int) {
 	v[up_off+up_k-1] = end1
 	v[up_off+up_k] = end1
 
-	var k, x, z int
+	var k, x, u, z int
 
 	for d := 1; true; d++ {
 		for k = -d; k <= d; k += 2 {
@@ -1875,11 +1883,10 @@ func algorithm_sms(data1, data2 []int, v []int) (int, int) {
 			} else {
 				z = x
 			}
-			for x < end1 && x-k < end2 && data1[x] == data2[x-k] {
-				x++
+			for u = x; x < end1 && x-k < end2 && data1[x] == data2[x-k]; x++ {
 			}
 			if odd && (up_k-d < k) && (k < up_k+d) && v[up_off+k] <= x {
-				return x, x - k
+				return u, u - k, x, x - k
 			}
 			v[down_off+k] = x
 		}
@@ -1892,16 +1899,15 @@ func algorithm_sms(data1, data2 []int, v []int) (int, int) {
 					x = z - 1
 				}
 			}
-			for x > 0 && x > k && data1[x-1] == data2[x-k-1] {
-				x--
+			for u = x; x > 0 && x > k && data1[x-1] == data2[x-k-1]; x-- {
 			}
 			if !odd && (-d <= k) && (k <= d) && x <= v[down_off+k] {
-				return x, x - k
+				return x, x - k, u, u - k
 			}
 			v[up_off+k] = x
 		}
 	}
-	return 0, 0 // should not reach here
+	return 0, 0, 0, 0 // should not reach here
 }
 
 //
@@ -1957,22 +1963,24 @@ func algorithm_lcs(data1, data2 []int, change1, change2 []bool, v []int) {
 		data1, change1 = data1[start1:end1], change1[start1:end1]
 		data2, change2 = data2[start2:end2], change2[start2:end2]
 
-		var mid1, mid2 int
+		var x0, y0, x1, y1 int
 
 		if len(data1) == 1 {
 			// match one item, use simple search function
-			mid1, mid2 = find_one_sms(data1[0], data2)
+			x0, y0 = find_one_sms(data1[0], data2)
+			x1, y1 = x0, y0
 		} else if len(data2) == 1 {
 			// match one item, use simple search function
-			mid2, mid1 = find_one_sms(data2[0], data1)
+			y0, x0 = find_one_sms(data2[0], data1)
+			x1, y1 = x0, y0
 		} else {
 			// Find a point with the longest common sequence
-			mid1, mid2 = algorithm_sms(data1, data2, v)
+			x0, y0, x1, y1 = algorithm_sms(data1, data2, v)
 		}
 
 		// Use the partitions to split this problem into subproblems.
-		algorithm_lcs(data1[:mid1], data2[:mid2], change1[:mid1], change2[:mid2], v)
-		algorithm_lcs(data1[mid1:], data2[mid2:], change1[mid1:], change2[mid2:], v)
+		algorithm_lcs(data1[:x0], data2[:y0], change1[:x0], change2[:y0], v)
+		algorithm_lcs(data1[x1:], data2[y1:], change1[x1:], change2[y1:], v)
 	}
 }
 
@@ -2017,6 +2025,7 @@ func find_shift_boundary(start int, data []int, change []bool) (int, int, int, b
 	return end, up, down, up_join, down_join
 }
 
+// scoring function for shifting characters in a line.
 func rune_edge_score(r rune) int {
 
 	switch r {
@@ -2052,7 +2061,9 @@ func shift_boundaries(data []int, change []bool, boundary_score func(int, int) i
 			break
 		}
 
+		// find the limit of where this set of changes can be shifted
 		end, up, down, up_join, down_join := find_shift_boundary(start, data, change)
+
 		switch {
 		case up > 0 && up_join:
 			// shift up, merged with previous chunk of changes
@@ -2071,7 +2082,7 @@ func shift_boundaries(data []int, change []bool, boundary_score func(int, int) i
 			}
 
 		default:
-			// Only perform shifts when there is a boundary score
+			// Only perform shifts when there is a boundary score function
 			if (up > 0 || down > 0) && boundary_score != nil {
 				offset, best_score := 0, -1
 				for i := -up; i <= down; i++ {
@@ -2128,17 +2139,15 @@ func job_queue_init() {
 	}
 }
 
-// Queue file comparison
+// Queue file comparison task
 func queue_diff_file(fname1, fname2 string, finfo1, finfo2 os.FileInfo) {
-	job := JobQueue{
+	job_wait.Add(1)
+	job_queue <- JobQueue{
 		name1: fname1,
 		name2: fname2,
 		info1: finfo1,
 		info2: finfo2,
 	}
-
-	job_wait.Add(1)
-	job_queue <- job
 }
 
 // Acquire Mutext lock on output stream

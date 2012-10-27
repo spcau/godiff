@@ -16,15 +16,28 @@ See `godiff -h` for all the available command line options
 
 ##Features
 
-* When comparing two directory, place all the differences into  a single html file.
-* Supports UTF8 file. 
+* When comparing two directory, place all the differences into a single html file.
+* Supports UTF8 file.
 * Show differences within a line
 * Options for ignore case, white spaces compare, blank lines etc.
 
+##Description
+
+I need a program to to compare 2 directories, and report differences in all
+files. Much like gnudiff, but with a nicer output. And I also like to try out
+the go programming language, so I created __godiff__.
+
+The _diff_ algorithm implemented here is based on 
+_"An O(ND) Difference Algorithm and its Variations"_
+by Eugene Myers Algorithmica Vol. 1 No. 2, 1986, p 251. 
+
+__godiff__ always tries to produce the minimal differences, 
+just like gnudiff with the "-d" option.
+
 ##Go Language
 
-This program is created in the go language.
-Download go from [golang.org](http://golang.org)
+This program is created in the go programming language.
+For more information about _go_, see [golang.org](http://golang.org)
 
 ##How to Build
 

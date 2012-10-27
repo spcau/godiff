@@ -519,6 +519,8 @@ func write_html_bytes(buf *bytes.Buffer, line []byte) {
 	lasti := 0
 
 	for i, v := range line {
+
+		// this this faster than using swtch/case
 		if v == '<' {
 			esc = html_entity_lt
 		} else if v == '>' {
@@ -533,12 +535,9 @@ func write_html_bytes(buf *bytes.Buffer, line []byte) {
 			continue
 		}
 
-		if esc != "" {
-			buf.Write(line[lasti:i])
-			buf.WriteString(esc)
-			esc = ""
-			lasti = i + 1
-		}
+		buf.Write(line[lasti:i])
+		buf.WriteString(esc)
+		lasti = i + 1
 	}
 
 	buf.Write(line[lasti:])
@@ -841,7 +840,8 @@ func diff_text_header(outfmt *OutputFormat) {
 	if !outfmt.header_printed {
 		out_acquire_lock()
 		outfmt.header_printed = true
-		fmt.Fprintf(out, "#< %s\n#> %s\n", outfmt.name1, outfmt.name2)
+		fmt.Fprintf(out, "#< %s\n", outfmt.name1)
+		fmt.Fprintf(out, "#> %s\n", outfmt.name2)
 	}
 }
 

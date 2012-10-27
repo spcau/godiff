@@ -61,7 +61,7 @@ import (
 
 const (
 	// Version number
-	VERSION = "0.01"
+	VERSION = "0.02"
 
 	// Scan at up to this size in file for '\0' in test for binary file
 	BINARY_CHECK_SIZE = 65536
@@ -519,17 +519,18 @@ func write_html_bytes(buf *bytes.Buffer, line []byte) {
 	lasti := 0
 
 	for i, v := range line {
-		switch v {
-		case '<':
+		if v == '<' {
 			esc = html_entity_lt
-		case '>':
+		} else if v == '>' {
 			esc = html_entity_gt
-		case '&':
+		} else if v == '&' {
 			esc = html_entity_amp
-		case '\'':
+		} else if v == '\'' {
 			esc = html_entity_squote
-		case '"':
+		} else if v == '"' {
 			esc = html_entity_dquote
+		} else {
+			continue
 		}
 
 		if esc != "" {
@@ -991,7 +992,7 @@ func compare_line_bytes(line1, line2 []byte) bool {
 		for i < len1 && j < len2 {
 			v1, i = get_next_byte_nonspace(line1, i)
 			v2, j = get_next_byte_nonspace(line2, j)
-			if flag_cmp_ignore_case {
+			if flag_cmp_ignore_case && v1 != v2 {
 				v1, v2 = to_lower_byte(v1), to_lower_byte(v2)
 			}
 			if v1 != v2 {
@@ -1006,7 +1007,7 @@ func compare_line_bytes(line1, line2 []byte) bool {
 		for i < len1 && j < len2 {
 			v1, i = get_next_byte_xspace(line1, i)
 			v2, j = get_next_byte_xspace(line2, j)
-			if flag_cmp_ignore_case {
+			if flag_cmp_ignore_case && v1 != v2 {
 				v1, v2 = to_lower_byte(v1), to_lower_byte(v2)
 			}
 			if v1 != v2 {
@@ -1044,7 +1045,7 @@ func compare_line_unicode(line1, line2 []byte) bool {
 		for i < len1 && j < len2 {
 			v1, i = get_next_rune_nonspace(line1, i)
 			v2, j = get_next_rune_nonspace(line2, j)
-			if flag_cmp_ignore_case {
+			if flag_cmp_ignore_case && v1 != v2 {
 				v1, v2 = unicode.ToLower(v1), unicode.ToLower(v2)
 			}
 			if v1 != v2 {
@@ -1059,7 +1060,7 @@ func compare_line_unicode(line1, line2 []byte) bool {
 		for i < len1 && j < len2 {
 			v1, i = get_next_rune_xspace(line1, i)
 			v2, j = get_next_rune_xspace(line2, j)
-			if flag_cmp_ignore_case {
+			if flag_cmp_ignore_case && v1 != v2 {
 				v1, v2 = unicode.ToLower(v1), unicode.ToLower(v2)
 			}
 			if v1 != v2 {
@@ -1077,7 +1078,7 @@ func compare_line_unicode(line1, line2 []byte) bool {
 		for i < len1 && j < len2 {
 			v1, size1 = utf8.DecodeRune(line1[i:])
 			v2, size2 = utf8.DecodeRune(line2[j:])
-			if unicode.ToLower(v1) != unicode.ToLower(v2) {
+			if v1 != v2 && unicode.ToLower(v1) != unicode.ToLower(v2) {
 				return false
 			}
 			i, j = i+size1, j+size2

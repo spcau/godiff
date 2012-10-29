@@ -19,6 +19,7 @@ package main
 
 import (
 	"os"
+	"reflect"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -42,16 +43,13 @@ func map_file(file *os.File, offset, size int) ([]byte, error) {
 		return nil, err
 	}
 
+	// store the mapping handle
 	win_mapper_mutex.Lock()
 	win_mapper_handle[addr] = h
 	win_mapper_mutex.Unlock()
 
 	// Slice memory layout
-	sl := struct {
-		addr uintptr
-		len  int
-		cap  int
-	}{addr, size, size}
+	sl := reflect.SliceHeader{Data: addr, Len: size, Cap: size}
 
 	// Use unsafe to turn sl into a []byte.
 	bp := *(*[]byte)(unsafe.Pointer(&sl))
@@ -65,12 +63,13 @@ func unmap_file(data []byte) error {
 	// Use unsafe to get the buffer address
 	addr := uintptr(unsafe.Pointer(&data[0]))
 
+	// retrieve the mapping handle
 	win_mapper_mutex.Lock()
 	h := win_mapper_handle[addr]
 	delete(win_mapper_handle, addr)
 	win_mapper_mutex.Unlock()
 
-	// call the windows function
+	// unmap file view
 	err := syscall.UnmapViewOfFile(addr)
 
 	// close the mapping handle

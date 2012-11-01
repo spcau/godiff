@@ -377,6 +377,30 @@ func do_diff(data1, data2 []int) ([]bool, []bool) {
 }
 
 //
+// Find the begin/end of this 'changed' segment 
+//
+func next_change_segment(start *int, change []bool, data []int) (int, int) {
+
+	// find the end of this changes segment
+	end := *start + 1
+	for end < len(change) && change[end] {
+		end++
+	}
+
+	// skip blank lines in the begining and end of the changes
+	i, j := *start, end
+	for i < end && data[i] == 0 {
+		i++
+	}
+	for j > i && data[j-1] == 0 {
+		j--
+	}
+
+	*start = end
+	return i, j
+}
+
+//
 // Report diff changes.
 // For each type of change, call the corresponding insert/modify/remove/same function
 //
@@ -399,62 +423,33 @@ func report_changes(chg DiffChanger, data1, data2 []int, change1, change2 []bool
 
 		// change in both lists
 		case i1 < len1 && i2 < len2 && change1[i1] && change2[i2]:
-			// find the end of this changes segment
-			s1, s2 := i1+1, i2+1
-			for s1 < len1 && change1[s1] {
-				s1++
-			}
-			for s2 < len2 && change2[s2] {
-				s2++
-			}
+			m1start, m1end := next_change_segment(&i1, change1, data1)
+			m2start, m2end := next_change_segment(&i2, change2, data2)
 
-			// skip blank lines in the begining of the changes
-			for i1 < s1 && data1[i1] == 0 {
-				i1++
-			}
-			for i2 < s2 && data2[i2] == 0 {
-				i2++
-			}
-
-			if i1 < s1 && i2 < s2 {
-				chg.diff_modify(i1, s1, i2, s2)
+			if m1start < m1end && m2start < m2end {
+				chg.diff_modify(m1start, m1end, m2start, m2end)
 				changed = true
-			} else if i1 < s1 {
-				chg.diff_remove(i1, s1, i2, i2)
+			} else if m1start < m1end {
+				chg.diff_remove(m1start, m1end, m2start, m2end)
 				changed = true
-			} else if i2 < s2 {
-				chg.diff_insert(i1, i1, i2, s2)
+			} else if m2start < m2end {
+				chg.diff_insert(m1start, m1end, m2start, m2end)
 				changed = true
 			}
-			i1, i2 = s1, s2
 
 		case i1 < len1 && change1[i1]:
-			s1 := i1 + 1
-			for s1 < len1 && change1[s1] {
-				s1++
-			}
-			for i1 < s1 && data1[i1] == 0 {
-				i1++
-			}
-			if i1 < s1 {
-				chg.diff_remove(i1, s1, i2, i2)
+			m1start, m1end := next_change_segment(&i1, change1, data1)
+			if m1start < m1end {
+				chg.diff_remove(m1start, m1end, i2, i2)
 				changed = true
 			}
-			i1 = s1
 
 		case i2 < len2 && change2[i2]:
-			s2 := i2 + 1
-			for s2 < len2 && change2[s2] {
-				s2++
-			}
-			for i2 < s2 && data2[i2] == 0 {
-				i2++
-			}
-			if i2 < s2 {
-				chg.diff_insert(i1, i1, i2, s2)
+			m2start, m2end := next_change_segment(&i2, change2, data2)
+			if m2start < m2end {
+				chg.diff_insert(i1, i1, m2start, m2end)
 				changed = true
 			}
-			i2 = s2
 
 		default: // should not reach here
 			return true
@@ -577,7 +572,6 @@ func output_diff_message_content(filename1, filename2 string, info1, info2 os.Fi
 			write_html_bytes(&outfmt.buf1, []byte(msg1))
 			outfmt.buf1.WriteString("</span>")
 		} else if data1 != nil && len(data1) > 0 {
-
 			outfmt.buf1.WriteString("<span class=\"nop\">")
 			write_html_bytes(&outfmt.buf1, data1)
 			outfmt.buf1.WriteString("</span>")
@@ -648,8 +642,8 @@ func html_add_block(outfmt *OutputFormat) {
 	outfmt.line2_start = -1
 }
 
+// Add 'context' lines to diff output
 func html_add_context_lines(outfmt *OutputFormat, data1, data2 [][]byte, line1, line2 int) {
-
 	var end1, end2 int
 
 	// Add 'context' lines after the last 'diff' and before this 'diff' segment
@@ -904,18 +898,6 @@ func (chg *DiffChangeFileText) diff_remove(start1, end1, start2, end2 int) {
 		out.Write(line)
 		out.WriteByte('\n')
 	}
-}
-
-// Close file (and umap it)
-func (file *Filedata) close_file() {
-	if file.osfile != nil {
-		if file.is_mapped && file.data != nil {
-			unmap_file(file.data)
-		}
-		file.osfile.Close()
-		file.osfile = nil
-	}
-	file.data = nil
 }
 
 func is_space(b byte) bool {
@@ -1524,7 +1506,6 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 		if err != nil {
 			file.osfile.Close()
 			file.osfile = nil
-			file.data = nil
 			file.errormsg = err.Error()
 			return file
 		}
@@ -1534,9 +1515,6 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 		fdata := make([]byte, fsize, fsize)
 		n, err := file.osfile.Read(fdata)
 		if err != nil {
-			file.osfile.Close()
-			file.osfile = nil
-			file.data = nil
 			file.errormsg = err.Error()
 			return file
 		}
@@ -1549,6 +1527,19 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 	return file
 }
 
+// Close file (and umap it)
+func (file *Filedata) close_file() {
+	if file.osfile != nil {
+		if file.is_mapped && file.data != nil {
+			unmap_file(file.data)
+		}
+		file.osfile.Close()
+		file.osfile = nil
+	}
+	file.data = nil
+}
+
+// check if file is binary
 func (file *Filedata) check_binary() {
 	if file.data == nil {
 		return
@@ -1647,6 +1638,7 @@ func diff_dirs(dirname1, dirname2 string, finfo1, finfo2 os.FileInfo) {
 		return
 	}
 
+	// Loop through all files, then all directories
 	for _, dir_mode := range []bool{false, true} {
 		i1, i2 := 0, 0
 		for i1 < len(dir1) || i2 < len(dir2) {
@@ -1877,6 +1869,8 @@ func algorithm_sms(data1, data2 []int, v []int) (int, int, int, int) {
 	var k, x, u, z int
 
 	for d := 1; true; d++ {
+		up_k_plus_d := up_k + d
+		up_k_minus_d := up_k - d
 		for k = -d; k <= d; k += 2 {
 			x = v[down_off+k+1]
 			if k > -d && (k == d || z >= x) {
@@ -1886,17 +1880,17 @@ func algorithm_sms(data1, data2 []int, v []int) (int, int, int, int) {
 			}
 			for u = x; x < end1 && x-k < end2 && data1[x] == data2[x-k]; x++ {
 			}
-			if odd && (up_k-d < k) && (k < up_k+d) && v[up_off+k] <= x {
+			if odd && (up_k_minus_d < k) && (k < up_k_plus_d) && v[up_off+k] <= x {
 				return u, u - k, x, x - k
 			}
 			v[down_off+k] = x
 		}
-		z = v[up_off+up_k-d-1]
-		for k = up_k - d; k <= up_k+d; k += 2 {
+		z = v[up_off+up_k_minus_d-1]
+		for k = up_k_minus_d; k <= up_k_plus_d; k += 2 {
 			x = z
-			if k < up_k+d {
+			if k < up_k_plus_d {
 				z = v[up_off+k+1]
-				if k == up_k-d || z <= x {
+				if k == up_k_minus_d || z <= x {
 					x = z - 1
 				}
 			}
@@ -2049,6 +2043,9 @@ func rune_bouundary_score(r1, r2 int) int {
 	return s1 + s2
 }
 
+//
+// shift changes up or down to make it more readable.
+//
 func shift_boundaries(data []int, change []bool, boundary_score func(int, int) int) {
 
 	start, clen := 0, len(change)

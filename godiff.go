@@ -19,12 +19,12 @@
 //  This program can be use to compare files and directories for differences.
 //  When comparing directories, it iterates through all files in both directories
 //  and compare files having the same name.
-//  
-//  It uses the algorithm from "An O(ND) Difference Algorithm and its Variations" 
-//  by Eugene Myers Algorithmica Vol. 1 No. 2, 1986, p 251. 
-// 
+//
+//  It uses the algorithm from "An O(ND) Difference Algorithm and its Variations"
+//  by Eugene Myers Algorithmica Vol. 1 No. 2, 1986, p 251.
+//
 // Main Features:
-//  * Supports UTF8 file. 
+//  * Supports UTF8 file.
 //  * Show differences within a line
 //  * Options for ignore case, white spaces compare, blank lines etc.
 //
@@ -377,7 +377,7 @@ func do_diff(data1, data2 []int) ([]bool, []bool) {
 }
 
 //
-// Find the begin/end of this 'changed' segment 
+// Find the begin/end of this 'changed' segment
 //
 func next_change_segment(start *int, change []bool, data []int) (int, int) {
 
@@ -1196,7 +1196,7 @@ type EquivClass struct {
 }
 
 type LinesData struct {
-	ids        []int // Id's for each line, 
+	ids        []int // Id's for each line,
 	zids       []int // list of ids with unmatched lines replaced by a single entry (and blank lines removed)
 	zcount     []int // Number of lines that represent each zids entry
 	change     []bool
@@ -1229,7 +1229,7 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 	// create the slice we are using for hash tables
 	eqhash := make([]*EquivClass, buckets)
 
-	// Use id=0 for blank lines. 
+	// Use id=0 for blank lines.
 	// Later in report_changes(), do not report changes on chunks of lines with id=0
 	if flag_cmp_ignore_blank_lines {
 		hashcode := compute_hash(blank_line)
@@ -1377,7 +1377,7 @@ func compress_equiv_ids(lines1, lines2 *LinesData, max_id1, max_id2 int) {
 	lines1.zids_start, lines1.zids_end = i1, j1
 	lines2.zids_start, lines2.zids_end = i2, j2
 
-	// Go through all lines, replace chunk of lines that does not exists in the 
+	// Go through all lines, replace chunk of lines that does not exists in the
 	// other set with a single entry and a negative new id).
 	next_id := max_int(max_id1, max_id2) + 1
 	for findex := 0; findex < 2; findex++ {
@@ -1596,7 +1596,7 @@ func (s FileInfoList) Len() int           { return len(s) }
 func (s FileInfoList) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 func (s FileInfoList) Less(i, j int) bool { return s[i].Name() < s[j].Name() }
 
-// get a list of sorted directory entries 
+// get a list of sorted directory entries
 func read_sorted_dir(dirname string) ([]os.FileInfo, error) {
 
 	dir, err := os.Open(dirname)
@@ -2082,11 +2082,11 @@ func shift_boundaries(data []int, change []bool, boundary_score func(int, int) i
 		default:
 			// Only perform shifts when there is a boundary score function
 			if (up > 0 || down > 0) && boundary_score != nil {
-				offset, best_score := 0, -1
+				offset, best_score := 0, boundary_score(data[start], data[end-1])
 				for i := -up; i <= down; i++ {
 					if i != 0 {
 						score := boundary_score(data[start+i], data[end+i-1])
-						if offset == 0 || score > best_score {
+						if score > best_score {
 							offset, best_score = i, score
 						}
 					}

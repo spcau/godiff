@@ -47,6 +47,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"html"
 	"os"
 	"runtime"
@@ -1072,26 +1073,19 @@ func compare_line_unicode(line1, line2 []byte) bool {
 	return true
 }
 
-// for FVN hash function
-const (
-	fnv_offset32 = 2166136261
-	fnv_prime32  = 16777619
-)
+var crc_table = crc32.MakeTable(crc32.Castagnoli)
 
 func hash32(h uint32, b byte) uint32 {
-	return (h ^ uint32(b)) * fnv_prime32
+	return crc_table[byte(h)^b] ^ (h >> 8)
 }
 
 func compute_hash_exact(data []byte) uint32 {
-	h := uint32(fnv_offset32)
-	for _, v := range data {
-		h = hash32(h, v)
-	}
-	return h
+	// On amd64, this will be using the SSE4.2 hardware instructions, much faster!
+	return crc32.Update(0, crc_table, data)
 }
 
 func compute_hash_bytes(line1 []byte) uint32 {
-	hash := uint32(fnv_offset32)
+	var hash uint32
 	switch {
 	case flag_cmp_ignore_all_space:
 		for _, v1 := range line1 {
@@ -1132,7 +1126,7 @@ func compute_hash_bytes(line1 []byte) uint32 {
 }
 
 func compute_hash_unicode(line1 []byte) uint32 {
-	hash := uint32(fnv_offset32)
+	var hash uint32
 	i, len1 := 0, len(line1)
 
 	switch {

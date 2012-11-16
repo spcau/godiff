@@ -1821,14 +1821,6 @@ func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 }
 
 // shortcut functions. hopefully will be inlined by compiler
-func abs_int(a int) int {
-	if a < 0 {
-		return -a
-	}
-	return a
-}
-
-// shortcut functions. hopefully will be inlined by compiler
 func max_int(a, b int) int {
 	if a < b {
 		return b
@@ -1976,13 +1968,12 @@ func algorithm_lcs(data1, data2 []int, change1, change2 []bool, v []int) {
 // Perform the shift
 func do_shift_boundary(start, end, offset int, change []bool) {
 	if offset < 0 {
-		offset = -offset
-		for offset > 0 {
-			start, end, offset = start-1, end-1, offset-1
+		for offset != 0 {
+			start, end, offset = start-1, end-1, offset+1
 			change[start], change[end] = true, false
 		}
 	} else {
-		for offset > 0 {
+		for offset != 0 {
 			change[start], change[end] = false, true
 			start, end, offset = start+1, end+1, offset-1
 		}
@@ -2007,11 +1998,11 @@ func find_shift_boundary(start int, data []int, change []bool) (int, int, int, b
 		down = down + 1
 	}
 
-	// has changes been shifted to start/end of list or joined with previous/next change
-	up_join := (start-up == 0) || change[start-up-1]
-	down_join := (end+down == dlen) || change[end+down]
+	// has changes been shifted to start/end of list or merged with previous/next change
+	up_merge := (start-up == 0) || change[start-up-1]
+	down_merge := (end+down == dlen) || change[end+down]
 
-	return end, up, down, up_join, down_join
+	return end, up, down, up_merge, down_merge
 }
 
 // scoring function for shifting characters in a line.
@@ -2054,48 +2045,43 @@ func shift_boundaries(data []int, change []bool, boundary_score func(int, int) i
 		}
 
 		// find the limit of where this set of changes can be shifted
-		end, up, down, up_join, down_join := find_shift_boundary(start, data, change)
+		end, up, down, up_merge, down_merge := find_shift_boundary(start, data, change)
 
 		switch {
-		case up > 0 && up_join:
+		case up > 0 && up_merge:
 			// shift up, merged with previous chunk of changes
 			do_shift_boundary(start, end, -up, change)
-			for start-1 >= 0 && change[start-1] {
-				start--
+			// restart at the begining of this merged chunk
+			for start -= up; start-1 >= 0 && change[start-1]; start-- {
 			}
 
-		case down > 0 && down_join:
+		case down > 0 && down_merge:
 			// shift down, merged with next chunk of changes
 			do_shift_boundary(start, end, down, change)
-			if end+down < clen {
-				start = start + down
-			} else {
-				start = clen
+			start += down
+
+		case (up > 0 || down > 0) && boundary_score != nil:
+			// Only perform shifts when there is a boundary score function
+			offset, best_score := 0, boundary_score(data[start], data[end-1])
+			for i := -up; i <= down; i++ {
+				if i != 0 {
+					score := boundary_score(data[start+i], data[end+i-1])
+					if score > best_score {
+						offset, best_score = i, score
+					}
+				}
+			}
+			if offset != 0 {
+				do_shift_boundary(start, end, offset, change)
+			}
+			start = end
+			if offset > 0 {
+				start += offset
 			}
 
 		default:
-			// Only perform shifts when there is a boundary score function
-			if (up > 0 || down > 0) && boundary_score != nil {
-				offset, best_score := 0, boundary_score(data[start], data[end-1])
-				for i := -up; i <= down; i++ {
-					if i != 0 {
-						score := boundary_score(data[start+i], data[end+i-1])
-						if score > best_score {
-							offset, best_score = i, score
-						}
-					}
-				}
-				if offset != 0 {
-					do_shift_boundary(start, end, offset, change)
-				}
-				if offset < 0 {
-					start = end
-				} else {
-					start = end + offset
-				}
-			} else {
-				start = end
-			}
+			// no shift
+			start = end
 		}
 	}
 }

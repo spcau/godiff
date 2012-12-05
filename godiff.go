@@ -62,7 +62,7 @@ import (
 
 const (
 	// Version number
-	VERSION = "0.02"
+	VERSION = "0.03"
 
 	// Scan at up to this size in file for '\0' in test for binary file
 	BINARY_CHECK_SIZE = 65536
@@ -905,20 +905,20 @@ func is_space(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\v' || b == '\f'
 }
 
-func get_next_rune_nonspace(line []byte, i int) (rune, int) {
-	b, size := utf8.DecodeRune(line[i:])
-	i += size
-	if !unicode.IsSpace(b) {
-		return b, i
-	}
+func skip_space_rune(line []byte, i int) int {
 	for i < len(line) {
 		b, size := utf8.DecodeRune(line[i:])
-		i += size
 		if !unicode.IsSpace(b) {
-			return b, i
+			return i
 		}
+		i += size
 	}
-	return 0, i
+	return i
+}
+
+func get_next_rune_nonspace(line []byte, i int) (rune, int) {
+	b, size := utf8.DecodeRune(line[i:])
+	return b, skip_space_rune(line, i+size)
 }
 
 func get_next_rune_xspace(line []byte, i int) (rune, int) {
@@ -937,18 +937,18 @@ func get_next_rune_xspace(line []byte, i int) (rune, int) {
 	return ' ', i
 }
 
-func get_next_byte_nonspace(line []byte, i int) (byte, int) {
-	b, i := line[i], i+1
-	if !is_space(b) {
-		return b, i
-	}
+func skip_space_byte(line []byte, i int) int {
 	for i < len(line) {
-		b, i = line[i], i+1
-		if !is_space(b) {
-			return b, i
+		if !is_space(line[i]) {
+			return i
 		}
+		i++
 	}
-	return 0, i
+	return i
+}
+
+func get_next_byte_nonspace(line []byte, i int) (byte, int) {
+	return line[i], skip_space_byte(line, i+1)
 }
 
 func get_next_byte_xspace(line []byte, i int) (byte, int) {
@@ -972,6 +972,8 @@ func compare_line_bytes(line1, line2 []byte) bool {
 	var v1, v2 byte
 	switch {
 	case flag_cmp_ignore_all_space:
+		i = skip_space_byte(line1, 0)
+		j = skip_space_byte(line2, 0)
 		for i < len1 && j < len2 {
 			v1, i = get_next_byte_nonspace(line1, i)
 			v2, j = get_next_byte_nonspace(line2, j)
@@ -1025,6 +1027,8 @@ func compare_line_unicode(line1, line2 []byte) bool {
 	var size1, size2 int
 	switch {
 	case flag_cmp_ignore_all_space:
+		i = skip_space_rune(line1, 0)
+		j = skip_space_rune(line2, 0)
 		for i < len1 && j < len2 {
 			v1, i = get_next_rune_nonspace(line1, i)
 			v2, j = get_next_rune_nonspace(line2, j)
@@ -2047,12 +2051,21 @@ func shift_boundaries(data []int, change []bool, boundary_score func(int, int) i
 		// find the limit of where this set of changes can be shifted
 		end, up, down, up_merge, down_merge := find_shift_boundary(start, data, change)
 
+		// The chunk is already at the start, do not shift downwards
+		if start == 0 {
+			up, down = 0, 0
+		}
+
 		switch {
 		case up > 0 && up_merge:
 			// shift up, merged with previous chunk of changes
 			do_shift_boundary(start, end, -up, change)
 			// restart at the begining of this merged chunk
-			for start -= up; start-1 >= 0 && change[start-1]; start-- {
+			nstart := start
+			for nstart -= up; nstart-1 >= 0 && change[nstart-1]; nstart-- {
+			}
+			if nstart > 0 {
+				start = nstart
 			}
 
 		case down > 0 && down_merge:

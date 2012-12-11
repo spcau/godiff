@@ -46,6 +46,7 @@ import (
 	"bufio"
 	"bytes"
 	"flag"
+	"regexp"
 	"fmt"
 	"hash/crc32"
 	"html"
@@ -62,7 +63,7 @@ import (
 
 const (
 	// Version number
-	VERSION = "0.03"
+	VERSION = "0.04"
 
 	// Scan at up to this size in file for '\0' in test for binary file
 	BINARY_CHECK_SIZE = 65536
@@ -192,6 +193,7 @@ var (
 	flag_suppress_missing_file   bool = false
 	flag_output_as_text          bool = false
 	flag_context_lines           int  = CONTEXT_LINES
+	flag_exclude_files           string
 	flag_max_goroutines               = 1
 )
 
@@ -206,6 +208,9 @@ var (
 	job_queue chan JobQueue
 	job_wait  sync.WaitGroup
 )
+
+// Files/Dirs to excludes
+var regexp_exclude_files *regexp.Regexp
 
 // Buffered stdout
 var (
@@ -256,6 +261,7 @@ func main() {
 	// setup command line options
 	flag.Usage = usage0
 	flag.StringVar(&flag_pprof_file, "prof", "", "Write pprof output to file")
+	flag.StringVar(&flag_exclude_files, "X", "", "Exclude files/directories matching this regexp pattern")
 	flag.BoolVar(&flag_version, "v", flag_version, "Print version information")
 	flag.IntVar(&flag_context_lines, "c", flag_context_lines, "Include N lines of context before and after changes")
 	flag.IntVar(&flag_max_goroutines, "g", flag_max_goroutines, "Max number of goroutines to use for file comparison")
@@ -283,6 +289,14 @@ func main() {
 		}
 		pprof.StartCPUProfile(pf)
 		defer pprof.StopCPUProfile()
+	}
+
+	if flag_exclude_files != "" {
+		r, err := regexp.Compile(flag_exclude_files)
+		if err != nil {
+			usage("Invlid exclude regex: " + err.Error())
+		}
+		regexp_exclude_files = r
 	}
 
 	// flush output on termination
@@ -341,7 +355,7 @@ func main() {
 		fmt.Fprintf(out, "<title>Compare %s vs %s</title>\n", html.EscapeString(file1), html.EscapeString(file2))
 		out.WriteString(HTML_CSS)
 		out.WriteString("</head><body>\n")
-		fmt.Fprintf(out, "<h1>Compare %s vs %s</h1><br>\n", html.EscapeString(file1), html.EscapeString(file2))
+		fmt.Fprintf(out, "<p>Compare <strong>%s</strong> vs <strong>%s</strong></p>\n", html.EscapeString(file1), html.EscapeString(file2))
 	}
 
 	switch {
@@ -1609,6 +1623,17 @@ func read_sorted_dir(dirname string) ([]os.FileInfo, error) {
 	}
 
 	dir.Close()
+
+	// Exclude files
+	if regexp_exclude_files != nil && len(all) > 0 {
+		eall := make([]os.FileInfo, 0, len(all))
+		for _, f := range all {
+			if !regexp_exclude_files.MatchString(f.Name()) {
+				eall = append(eall, f)
+			}
+		}
+		all = eall
+	}
 
 	sort.Sort(FileInfoList(all))
 

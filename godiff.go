@@ -46,11 +46,11 @@ import (
 	"bufio"
 	"bytes"
 	"flag"
-	"regexp"
 	"fmt"
 	"hash/crc32"
 	"html"
 	"os"
+	"regexp"
 	"runtime"
 	"runtime/pprof"
 	"sort"
@@ -194,7 +194,7 @@ var (
 	flag_output_as_text          bool = false
 	flag_context_lines           int  = CONTEXT_LINES
 	flag_exclude_files           string
-	flag_max_goroutines               = 1
+	flag_max_goroutines          = 1
 )
 
 // Job queue for goroutines
@@ -627,7 +627,6 @@ func html_add_block(outfmt *OutputFormat) {
 			if outfmt.fileinfo1 != nil {
 				fmt.Fprintf(out, "<br><span class=\"inf\">%d %s</span>", outfmt.fileinfo1.Size(), outfmt.fileinfo1.ModTime().Format(time.RFC1123))
 			}
-
 			out.WriteString("</td><td class=\"tth\"><span class=\"hdr\">")
 			out.WriteString(html.EscapeString(outfmt.name2))
 			out.WriteString("</span>")
@@ -636,7 +635,6 @@ func html_add_block(outfmt *OutputFormat) {
 			}
 			out.WriteString("</td></tr>")
 		}
-
 		out.WriteString("<tr><td class=\"ttd\">")
 		if outfmt.line1_start < outfmt.line1_end {
 			fmt.Fprintf(out, "<span class=\"lin\">Line %d to %d</span>", outfmt.line1_start+1, outfmt.line1_end)
@@ -657,7 +655,9 @@ func html_add_block(outfmt *OutputFormat) {
 	outfmt.line2_start = -1
 }
 
-// Add 'context' lines to diff output
+//
+// Add extra 'context' lines to diff output
+//
 func html_add_context_lines(outfmt *OutputFormat, data1, data2 [][]byte, line1, line2 int) {
 	var end1, end2 int
 
@@ -693,9 +693,7 @@ func html_add_context_lines(outfmt *OutputFormat, data1, data2 [][]byte, line1, 
 	end2 = line2 - flag_context_lines
 
 	if end1 > 0 && end2 > 0 && end1 > outfmt.line1_end && end2 > outfmt.line2_end {
-
 		html_add_block(outfmt)
-
 		outfmt.line1_end = end1
 		outfmt.line2_end = end2
 	}
@@ -915,6 +913,9 @@ func (chg *DiffChangeFileText) diff_remove(start1, end1, start2, end2 int) {
 	}
 }
 
+//
+// Test for space character
+//
 func is_space(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\v' || b == '\f'
 }
@@ -930,25 +931,34 @@ func skip_space_rune(line []byte, i int) int {
 	return i
 }
 
+//
+// Get the next rune, and skip spaces after it
+//
 func get_next_rune_nonspace(line []byte, i int) (rune, int) {
 	b, size := utf8.DecodeRune(line[i:])
 	return b, skip_space_rune(line, i+size)
 }
 
-func get_next_rune_xspace(line []byte, i int) (rune, int) {
+//
+// Get the next rune, and determine if there is a space after it.
+// Also ignore trailing spaces at end-of-line
+//
+func get_next_rune_xspace(line []byte, i int) (rune, bool, int) {
 	b, size := utf8.DecodeRune(line[i:])
 	i += size
-	if !unicode.IsSpace(b) {
-		return b, i
-	}
+	space_after := false
 	for i < len(line) {
-		b, size := utf8.DecodeRune(line[i:])
-		if !unicode.IsSpace(b) {
-			return ' ', i
+		s, size := utf8.DecodeRune(line[i:])
+		if !unicode.IsSpace(s) {
+			break
 		}
+		space_after = true
 		i += size
 	}
-	return ' ', i
+	if space_after && i >= len(line) {
+		space_after = false
+	}
+	return b, space_after, i
 }
 
 func skip_space_byte(line []byte, i int) int {
@@ -965,19 +975,20 @@ func get_next_byte_nonspace(line []byte, i int) (byte, int) {
 	return line[i], skip_space_byte(line, i+1)
 }
 
-func get_next_byte_xspace(line []byte, i int) (byte, int) {
+func get_next_byte_xspace(line []byte, i int) (byte, bool, int) {
 	b, i := line[i], i+1
-	if !is_space(b) {
-		return b, i
-	}
+	space_after := false
 	for i < len(line) {
-		b = line[i]
-		if !is_space(b) {
-			return ' ', i
+		if !is_space(line[i]) {
+			break
 		}
-		i = i + 1
+		space_after = true
+		i++
 	}
-	return ' ', i
+	if space_after && i >= len(line) {
+		space_after = false
+	}
+	return b, space_after, i
 }
 
 func compare_line_bytes(line1, line2 []byte) bool {
@@ -1003,13 +1014,16 @@ func compare_line_bytes(line1, line2 []byte) bool {
 		}
 
 	case flag_cmp_ignore_space_change:
+		var space_after1, space_after2 bool
+		i = skip_space_byte(line1, 0)
+		j = skip_space_byte(line2, 0)
 		for i < len1 && j < len2 {
-			v1, i = get_next_byte_xspace(line1, i)
-			v2, j = get_next_byte_xspace(line2, j)
+			v1, space_after1, i = get_next_byte_xspace(line1, i)
+			v2, space_after2, j = get_next_byte_xspace(line2, j)
 			if flag_cmp_ignore_case && v1 != v2 {
 				v1, v2 = to_lower_byte(v1), to_lower_byte(v2)
 			}
-			if v1 != v2 {
+			if v1 != v2 || space_after1 != space_after2 {
 				return false
 			}
 		}
@@ -1058,13 +1072,16 @@ func compare_line_unicode(line1, line2 []byte) bool {
 		}
 
 	case flag_cmp_ignore_space_change:
+		i = skip_space_rune(line1, 0)
+		j = skip_space_rune(line2, 0)
+		var space_after1, space_after2 bool
 		for i < len1 && j < len2 {
-			v1, i = get_next_rune_xspace(line1, i)
-			v2, j = get_next_rune_xspace(line2, j)
+			v1, space_after1, i = get_next_rune_xspace(line1, i)
+			v2, space_after2, j = get_next_rune_xspace(line2, j)
 			if flag_cmp_ignore_case && v1 != v2 {
 				v1, v2 = unicode.ToLower(v1), unicode.ToLower(v2)
 			}
-			if v1 != v2 {
+			if v1 != v2 || space_after1 != space_after2 {
 				return false
 			}
 		}
@@ -1097,6 +1114,14 @@ func hash32(h uint32, b byte) uint32 {
 	return crc_table[byte(h)^b] ^ (h >> 8)
 }
 
+func hash32_unicode(h uint32, r rune) uint32 {
+	for r != 0 {
+		h = hash32(h, byte(r))
+		r = r >> 8
+	}
+	return h
+}
+
 func compute_hash_exact(data []byte) uint32 {
 	// On amd64, this will be using the SSE4.2 hardware instructions, much faster!
 	return crc32.Update(0, crc_table, data)
@@ -1116,21 +1141,25 @@ func compute_hash_bytes(line1 []byte) uint32 {
 		}
 
 	case flag_cmp_ignore_space_change:
-		last_space := false
+		last_hash := hash
+		last_space := true
 		for _, v1 := range line1 {
 			if is_space(v1) {
-				if last_space {
-					continue
+				if !last_space {
+					last_hash = hash
+					hash = hash32(hash, ' ')
 				}
 				last_space = true
-				v1 = ' '
 			} else {
-				last_space = false
 				if flag_cmp_ignore_case {
 					v1 = to_lower_byte(v1)
 				}
+				hash = hash32(hash, v1)
+				last_space = false
 			}
-			hash = hash32(hash, v1)
+		}
+		if last_space {
+			hash = last_hash
 		}
 
 	case flag_cmp_ignore_case:
@@ -1156,34 +1185,32 @@ func compute_hash_unicode(line1 []byte) uint32 {
 				if flag_cmp_ignore_case {
 					v1 = unicode.ToLower(v1)
 				}
-				for v1 != 0 {
-					hash = hash32(hash, byte(v1))
-					v1 = v1 >> 8
-				}
+				hash = hash32_unicode(hash, v1)
 			}
 		}
 
 	case flag_cmp_ignore_space_change:
+		last_hash := hash
+		last_space := true
 		for i < len1 {
 			v1, size := utf8.DecodeRune(line1[i:])
-			i = i + size
+			i += size
 			if unicode.IsSpace(v1) {
-				for i < len1 {
-					v2, size := utf8.DecodeRune(line1[i:])
-					if !unicode.IsSpace(v2) {
-						break
-					}
-					i += size
+				if !last_space {
+					last_hash = hash
+					hash = hash32(hash, ' ')
 				}
-				v1 = ' '
+				last_space = true
+			} else {
+				if flag_cmp_ignore_case {
+					v1 = unicode.ToLower(v1)
+				}
+				hash = hash32_unicode(hash, v1)
+				last_space = false
 			}
-			if flag_cmp_ignore_case {
-				v1 = unicode.ToLower(v1)
-			}
-			for v1 != 0 {
-				hash = hash32(hash, byte(v1))
-				v1 = v1 >> 8
-			}
+		}
+		if last_space {
+			hash = last_hash
 		}
 
 	case flag_cmp_ignore_case:
@@ -1191,10 +1218,7 @@ func compute_hash_unicode(line1 []byte) uint32 {
 			v1, size := utf8.DecodeRune(line1[i:])
 			i = i + size
 			v1 = unicode.ToLower(v1)
-			for v1 != 0 {
-				hash = hash32(hash, byte(v1))
-				v1 = v1 >> 8
-			}
+			hash = hash32_unicode(hash, v1)
 		}
 	}
 	return hash
@@ -1272,7 +1296,6 @@ func find_equiv_lines(lines1, lines2 [][]byte) (*LinesData, *LinesData) {
 			hashcode := compute_hash(*lptr)
 			ihash := int(hashcode) & (buckets - 1)
 			eq := eqhash[ihash]
-
 			if eq == nil {
 				// not found in eqhash, create new entry
 				ids[i] = next_id

@@ -79,6 +79,9 @@ const (
 
 	// use mmap for file greather than this size, for smaller files just use Read() instead.
 	MMAP_THRESHOLD = 8 * 1024
+
+	// Number of lines to print for previewing file
+	NUM_PREVIEW_LINES = 10
 )
 
 // Error Messages
@@ -532,7 +535,7 @@ func write_html_bytes(buf *bytes.Buffer, line []byte) {
 
 	for i, v := range line {
 
-		// this this faster than using swtch/case
+		// hopefully this this faster than using swtch/case
 		if v == '<' {
 			esc = html_entity_lt
 		} else if v == '>' {
@@ -555,11 +558,18 @@ func write_html_bytes(buf *bytes.Buffer, line []byte) {
 	buf.Write(line[lasti:])
 }
 
-func output_diff_message(filename1, filename2 string, info1, info2 os.FileInfo, msg1, msg2 string, is_error bool) {
-	output_diff_message_content(filename1, filename2, info1, info2, msg1, msg2, nil, nil, is_error)
+func html_preview_file(buf *bytes.Buffer, lines [][]byte) {
+	n := min_int(NUM_PREVIEW_LINES, len(lines))
+	w := len(fmt.Sprintf("%d", n))
+	fmt.Fprintf(buf, "<span class=\"lin\">Line %d to %d</span>", 1, n)
+	buf.WriteString("<span class=\"nop\">")
+	for lineno, line := range lines[0:n] {
+		write_html_line(buf, line, lineno+1, w)
+	}
+	buf.WriteString("</span></span>")
 }
 
-func output_diff_message_content(filename1, filename2 string, info1, info2 os.FileInfo, msg1, msg2 string, data1, data2 []byte, is_error bool) {
+func output_diff_message_content(filename1, filename2 string, info1, info2 os.FileInfo, msg1, msg2 string, data1, data2 [][]byte, is_error bool) {
 
 	if flag_output_as_text {
 		out_acquire_lock()
@@ -575,36 +585,30 @@ func output_diff_message_content(filename1, filename2 string, info1, info2 os.Fi
 			fileinfo2: info2,
 		}
 
-		var id string
+		var span string
 		if is_error {
-			id = "err"
+			span = "<span class=\"err\">"
 		} else {
-			id = "msg"
+			span = "<span class=\"msg\">"
 		}
 
+		buf1 := &outfmt.buf1
+		buf2 := &outfmt.buf2
+
 		if msg1 != "" {
-			outfmt.buf1.WriteString("<span class=\"")
-			outfmt.buf1.WriteString(id)
-			outfmt.buf1.WriteString("\">")
-			write_html_bytes(&outfmt.buf1, []byte(msg1))
-			outfmt.buf1.WriteString("</span>")
+			buf1.WriteString(span)
+			write_html_bytes(buf1, []byte(msg1))
+			buf1.WriteString("</span>")
 		} else if data1 != nil && len(data1) > 0 {
-			outfmt.buf1.WriteString("<span class=\"nop\">")
-			write_html_bytes(&outfmt.buf1, data1)
-			outfmt.buf1.WriteString("</span>")
+			html_preview_file(buf1, data1)
 		}
 
 		if msg2 != "" {
-			outfmt.buf2.WriteString("<span class=\"")
-			outfmt.buf2.WriteString(id)
-			outfmt.buf2.WriteString("\">")
-			write_html_bytes(&outfmt.buf2, []byte(msg2))
-			outfmt.buf2.WriteString("</span>")
+			buf2.WriteString(span)
+			write_html_bytes(buf2, []byte(msg2))
+			buf2.WriteString("</span>")
 		} else if data2 != nil && len(data2) > 0 {
-
-			outfmt.buf2.WriteString("<span class=\"nop\">")
-			write_html_bytes(&outfmt.buf2, data2)
-			outfmt.buf2.WriteString("</span>")
+			html_preview_file(buf2, data2)
 		}
 
 		html_add_block(&outfmt)
@@ -614,6 +618,10 @@ func output_diff_message_content(filename1, filename2 string, info1, info2 os.Fi
 			out_release_lock()
 		}
 	}
+}
+
+func output_diff_message(filename1, filename2 string, info1, info2 os.FileInfo, msg1, msg2 string, is_error bool) {
+	output_diff_message_content(filename1, filename2, info1, info2, msg1, msg2, nil, nil, is_error)
 }
 
 func html_add_block(outfmt *OutputFormat) {
@@ -665,6 +673,33 @@ func write_html_lineno(buf *bytes.Buffer, lineno, width int) {
 	}
 }
 
+func write_html_line(buf *bytes.Buffer, line []byte, lineno, width int) {
+	write_html_lineno(buf, lineno, width)
+	if line != nil {
+		write_html_bytes(buf, line)
+	}
+	buf.WriteByte('\n')
+}
+
+func write_html_lines(buf *bytes.Buffer, class string, lines [][]byte, start, end, lineno_width int) {
+	buf.WriteString("<span class=\"")
+	buf.WriteString(class)
+	buf.WriteString("\">")
+	for lineno, line := range lines[start:end] {
+		write_html_line(buf, line, start + lineno + 1, lineno_width)
+	}
+	buf.WriteString("</span>")
+}
+
+func write_html_blanks(buf *bytes.Buffer, n int) {
+	buf.WriteString("<span class=\"nop\">")
+	for n > 0 {
+		buf.WriteString("<span class=\"lno\"> </span>\n")
+		n -= 1
+	}
+	buf.WriteString("</span>")
+}
+
 //
 // Add extra 'context' lines to diff output
 //
@@ -677,23 +712,11 @@ func html_add_context_lines(outfmt *OutputFormat, data1, data2 [][]byte, line1, 
 		end2 = min_int(len(data2), outfmt.line2_end+flag_context_lines)
 
 		if end1 < line1 && end2 < line2 {
-			outfmt.buf1.WriteString("<span class=\"nop\">")
-			for lineno, line := range data1[outfmt.line1_end:end1] {
-				write_html_lineno(&outfmt.buf1, outfmt.line1_end+lineno+1, outfmt.lineno_width)
-				write_html_bytes(&outfmt.buf1, line)
-				outfmt.buf1.WriteByte('\n')
-			}
+			write_html_lines(&outfmt.buf1, "nop", data1, outfmt.line1_end, end1, outfmt.lineno_width)
 			outfmt.line1_end = end1
-			outfmt.buf1.WriteString("</span>")
 
-			outfmt.buf2.WriteString("<span class=\"nop\">")
-			for lineno, line := range data2[outfmt.line2_end:end2] {
-				write_html_lineno(&outfmt.buf2, outfmt.line2_end+lineno+1, outfmt.lineno_width)
-				write_html_bytes(&outfmt.buf2, line)
-				outfmt.buf2.WriteByte('\n')
-			}
+			write_html_lines(&outfmt.buf2, "nop", data2, outfmt.line2_end, end2, outfmt.lineno_width)
 			outfmt.line2_end = end2
-			outfmt.buf2.WriteString("</span>")
 		}
 	}
 
@@ -718,25 +741,13 @@ func html_add_context_lines(outfmt *OutputFormat, data1, data2 [][]byte, line1, 
 	}
 
 	if line1 > outfmt.line1_end {
-		outfmt.buf1.WriteString("<span class=\"nop\">")
-		for lineno, line := range data1[outfmt.line1_end:line1] {
-			write_html_lineno(&outfmt.buf1, outfmt.line1_end+lineno+1, outfmt.lineno_width)
-			write_html_bytes(&outfmt.buf1, line)
-			outfmt.buf1.WriteByte('\n')
-		}
+		write_html_lines(&outfmt.buf1, "nop", data1, outfmt.line1_end, line1, outfmt.lineno_width)
 		outfmt.line1_end = line1
-		outfmt.buf1.WriteString("</span>")
 	}
 
 	if line2 > outfmt.line2_end {
-		outfmt.buf2.WriteString("<span class=\"nop\">")
-		for lineno, line := range data2[outfmt.line2_end:line2] {
-			write_html_lineno(&outfmt.buf2, outfmt.line2_end+lineno+1, outfmt.lineno_width)
-			write_html_bytes(&outfmt.buf2, line)
-			outfmt.buf2.WriteByte('\n')
-		}
+		write_html_lines(&outfmt.buf2, "nop", data2, outfmt.line2_end, line2, outfmt.lineno_width)
 		outfmt.line2_end = line2
-		outfmt.buf2.WriteString("</span>")
 	}
 }
 
@@ -745,35 +756,15 @@ func (chg *DiffChangeFileHtml) diff_same(start1, end1, start2, end2 int) {
 
 func (chg *DiffChangeFileHtml) diff_insert(start1, end1, start2, end2 int) {
 	html_add_context_lines(chg.outfmt, chg.file1, chg.file2, start1, start2)
-	chg.outfmt.buf1.WriteString("<span class=\"nop\">")
-	chg.outfmt.buf2.WriteString("<span class=\"add\">")
-	for lineno, line := range chg.file2[start2:end2] {
-		write_html_lineno(&chg.outfmt.buf2, lineno+start2+1, chg.outfmt.lineno_width)
-		write_html_bytes(&chg.outfmt.buf2, line)
-		chg.outfmt.buf2.WriteByte('\n')
-
-		write_html_lineno(&chg.outfmt.buf1, 0, chg.outfmt.lineno_width)
-		chg.outfmt.buf1.WriteByte('\n')
-	}
-	chg.outfmt.buf1.WriteString("</span>")
-	chg.outfmt.buf2.WriteString("</span>")
+	write_html_blanks(&chg.outfmt.buf1, end2 - start2)
+	write_html_lines(&chg.outfmt.buf2, "add", chg.file2, start2, end2, chg.outfmt.lineno_width)
 	chg.outfmt.line2_end = end2
 }
 
 func (chg *DiffChangeFileHtml) diff_remove(start1, end1, start2, end2 int) {
 	html_add_context_lines(chg.outfmt, chg.file1, chg.file2, start1, start2)
-	chg.outfmt.buf1.WriteString("<span class=\"del\">")
-	chg.outfmt.buf2.WriteString("<span class=\"nop\">")
-	for lineno, line := range chg.file1[start1:end1] {
-		write_html_lineno(&chg.outfmt.buf1, lineno+start1+1, chg.outfmt.lineno_width)
-		write_html_bytes(&chg.outfmt.buf1, line)
-		chg.outfmt.buf1.WriteByte('\n')
-
-		write_html_lineno(&chg.outfmt.buf2, 0, chg.outfmt.lineno_width)
-		chg.outfmt.buf2.WriteByte('\n')
-	}
-	chg.outfmt.buf1.WriteString("</span>")
-	chg.outfmt.buf2.WriteString("</span>")
+	write_html_lines(&chg.outfmt.buf1, "del", chg.file1, start1, end1, chg.outfmt.lineno_width)
+	write_html_blanks(&chg.outfmt.buf2, end1 - start1)
 	chg.outfmt.line1_end = end1
 }
 
@@ -830,34 +821,14 @@ func (chg *DiffChangeFileHtml) diff_modify(start1, end1, start2, end2 int) {
 	outfmt.line2_end = start2
 
 	if start1 < end1 {
-		outfmt.buf1.WriteString("<span class=\"del\">")
-		outfmt.buf2.WriteString("<span class=\"nop\">")
-		for lineno, line := range data1[start1:end1] {
-			write_html_lineno(&chg.outfmt.buf1, lineno+start1+1, chg.outfmt.lineno_width)
-			write_html_bytes(&outfmt.buf1, line)
-			outfmt.buf1.WriteByte('\n')
-
-			write_html_lineno(&chg.outfmt.buf2, 0, chg.outfmt.lineno_width)
-			outfmt.buf2.WriteByte('\n')
-		}
-		outfmt.buf1.WriteString("</span>")
-		outfmt.buf2.WriteString("</span>")
+		write_html_lines(&outfmt.buf1, "del", data1, start1, end1, outfmt.lineno_width)
+		write_html_blanks(&outfmt.buf2, end1 - start1)
 		outfmt.line1_end = end1
 	}
 
 	if start2 < end2 {
-		outfmt.buf1.WriteString("<span class=\"nop\">")
-		outfmt.buf2.WriteString("<span class=\"add\">")
-		for lineno, line := range data2[start2:end2] {
-			write_html_lineno(&chg.outfmt.buf2, lineno+start2+1, chg.outfmt.lineno_width)
-			write_html_bytes(&outfmt.buf2, line)
-			outfmt.buf2.WriteByte('\n')
-
-			write_html_lineno(&chg.outfmt.buf1, 0, chg.outfmt.lineno_width)
-			outfmt.buf1.WriteByte('\n')
-		}
-		outfmt.buf1.WriteString("</span>")
-		outfmt.buf2.WriteString("</span>")
+		write_html_blanks(&outfmt.buf1, end2 - start2)
+		write_html_lines(&outfmt.buf2, "add", data2, start2, end2, outfmt.lineno_width)
 		outfmt.line2_end = end2
 	}
 }
@@ -1775,7 +1746,7 @@ func diff_dirs(dirname1, dirname2 string, finfo1, finfo2 os.FileInfo) {
 					} else {
 						fdata := open_file(dirname1+PATH_SEPARATOR+name1, dir1[i1])
 						fdata.check_binary()
-						output_diff_message_content(dirname1+PATH_SEPARATOR+name1, dirname2+PATH_SEPARATOR+name1, dir1[i1], nil, fdata.errormsg, MSG_FILE_NOT_EXISTS, fdata.data, nil, true)
+						output_diff_message_content(dirname1+PATH_SEPARATOR+name1, dirname2+PATH_SEPARATOR+name1, dir1[i1], nil, fdata.errormsg, MSG_FILE_NOT_EXISTS, fdata.split_lines(), nil, true)
 						fdata.close_file()
 					}
 				}
@@ -1789,7 +1760,7 @@ func diff_dirs(dirname1, dirname2 string, finfo1, finfo2 os.FileInfo) {
 					} else {
 						fdata := open_file(dirname2+PATH_SEPARATOR+name2, dir2[i2])
 						fdata.check_binary()
-						output_diff_message_content(dirname1+PATH_SEPARATOR+name2, dirname2+PATH_SEPARATOR+name2, nil, dir2[i2], MSG_FILE_NOT_EXISTS, fdata.errormsg, nil, fdata.data, true)
+						output_diff_message_content(dirname1+PATH_SEPARATOR+name2, dirname2+PATH_SEPARATOR+name2, nil, dir2[i2], MSG_FILE_NOT_EXISTS, fdata.errormsg, nil, fdata.split_lines(), true)
 						fdata.close_file()
 					}
 				}

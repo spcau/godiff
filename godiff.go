@@ -686,7 +686,7 @@ func write_html_lines(buf *bytes.Buffer, class string, lines [][]byte, start, en
 	buf.WriteString(class)
 	buf.WriteString("\">")
 	for lineno, line := range lines[start:end] {
-		write_html_line(buf, line, start + lineno + 1, lineno_width)
+		write_html_line(buf, line, start+lineno+1, lineno_width)
 	}
 	buf.WriteString("</span>")
 }
@@ -756,7 +756,7 @@ func (chg *DiffChangeFileHtml) diff_same(start1, end1, start2, end2 int) {
 
 func (chg *DiffChangeFileHtml) diff_insert(start1, end1, start2, end2 int) {
 	html_add_context_lines(chg.outfmt, chg.file1, chg.file2, start1, start2)
-	write_html_blanks(&chg.outfmt.buf1, end2 - start2)
+	write_html_blanks(&chg.outfmt.buf1, end2-start2)
 	write_html_lines(&chg.outfmt.buf2, "add", chg.file2, start2, end2, chg.outfmt.lineno_width)
 	chg.outfmt.line2_end = end2
 }
@@ -764,7 +764,7 @@ func (chg *DiffChangeFileHtml) diff_insert(start1, end1, start2, end2 int) {
 func (chg *DiffChangeFileHtml) diff_remove(start1, end1, start2, end2 int) {
 	html_add_context_lines(chg.outfmt, chg.file1, chg.file2, start1, start2)
 	write_html_lines(&chg.outfmt.buf1, "del", chg.file1, start1, end1, chg.outfmt.lineno_width)
-	write_html_blanks(&chg.outfmt.buf2, end1 - start1)
+	write_html_blanks(&chg.outfmt.buf2, end1-start1)
 	chg.outfmt.line1_end = end1
 }
 
@@ -822,12 +822,12 @@ func (chg *DiffChangeFileHtml) diff_modify(start1, end1, start2, end2 int) {
 
 	if start1 < end1 {
 		write_html_lines(&outfmt.buf1, "del", data1, start1, end1, outfmt.lineno_width)
-		write_html_blanks(&outfmt.buf2, end1 - start1)
+		write_html_blanks(&outfmt.buf2, end1-start1)
 		outfmt.line1_end = end1
 	}
 
 	if start2 < end2 {
-		write_html_blanks(&outfmt.buf1, end2 - start2)
+		write_html_blanks(&outfmt.buf1, end2-start2)
 		write_html_lines(&outfmt.buf2, "add", data2, start2, end2, outfmt.lineno_width)
 		outfmt.line2_end = end2
 	}

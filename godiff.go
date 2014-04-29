@@ -114,6 +114,7 @@ type OutputFormat struct {
 	name1, name2           string
 	fileinfo1, fileinfo2   os.FileInfo
 	header_printed         bool
+	lineno_width           int
 }
 
 // Interface for diff report_change() callbacks.
@@ -152,9 +153,10 @@ const HTML_CSS = `<style type="text/css">
 .ttd {border-color:#808080; border-style:solid; border-width:1px 1px 1px 1px; border-collapse:collapse; padding:4px; vertical-align:top; text-align:left;}
 .hdr {color:black; font-size:85%;}
 .inf {color:#C08000; font-size:85%;}
-.err {color:red; font-size:85%; font-style:bold; margin:0; display:block;}
-.msg {color:#508050; font-size:85%; font-style:bold; margin:0; display:block;}
-.lin {color:#C08000; font-size:75%; font-style:italic; margin:0; display:block;}
+.err {color:red; font-size:85%; font-weight:bold; margin:0; display:block;}
+.msg {color:#508050; font-size:85%; font-weight:bold; margin:0; display:block;}
+.lin {color:#C08000; font-size:75%; font-weight:bold; font-style:italic; margin:0; display:block;}
+.lno {color:#C08000; background-color:white; font-style:italic; margin:0;}
 .nop {color:black; font-size:75%; font-family:monospace; white-space:pre; margin:0; display:block;}
 .upd {color:black; font-size:75%; font-family:monospace; white-space:pre; margin:0; background-color:#CFCFFF; display:block;}
 .chg {color:#C00080;}
@@ -165,16 +167,16 @@ const HTML_CSS = `<style type="text/css">
 const HTML_LEGEND = `<br><b>Legend:</b><br><table class="tab">
 <tr><td class="tth"><span class="hdr">filename 1</span></td><td class="tth"><span class="hdr">filename 2</span></td></tr>
 <tr><td class="ttd">
-<span class="lin">Line N</span>
-<span class="del">  line deleted</span>
-<span class="nop">  no change</span>
-<span class="upd">  line modified</span>
+<span class="lin">Line 1 to 3</span>
+<span class="del"><span class="lno">1 </span>line deleted</span>
+<span class="nop"><span class="lno">2 </span>no change</span>
+<span class="upd"><span class="lno">3 </span>line modified</span>
 </td>
 <td class="ttd">
-<span class="lin">Line M</span>
-<span class="add">  line added</span>
-<span class="nop">  no change</span>
-<span class="upd">  <span class="chg">L</span>ine <span class="chg">M</span>odified</span>
+<span class="lin">Line 1 to 3</span>
+<span class="add"><span class="lno">1 </span>line added</span>
+<span class="nop"><span class="lno">2 </span>no change</span>
+<span class="upd"><span class="lno">3 </span><span class="chg">L</span>ine <span class="chg">M</span>odified</span>
 </td></tr>
 </table>
 `
@@ -655,6 +657,14 @@ func html_add_block(outfmt *OutputFormat) {
 	outfmt.line2_start = -1
 }
 
+func write_html_lineno(buf *bytes.Buffer, lineno, width int) {
+	if lineno > 0 {
+		fmt.Fprintf(buf, "<span class=\"lno\">%-*d </span>", width, lineno)
+	} else {
+		buf.WriteString("<span class=\"lno\"> </span>")
+	}
+}
+
 //
 // Add extra 'context' lines to diff output
 //
@@ -668,7 +678,8 @@ func html_add_context_lines(outfmt *OutputFormat, data1, data2 [][]byte, line1, 
 
 		if end1 < line1 && end2 < line2 {
 			outfmt.buf1.WriteString("<span class=\"nop\">")
-			for _, line := range data1[outfmt.line1_end:end1] {
+			for lineno, line := range data1[outfmt.line1_end:end1] {
+				write_html_lineno(&outfmt.buf1, outfmt.line1_end+lineno+1, outfmt.lineno_width)
 				write_html_bytes(&outfmt.buf1, line)
 				outfmt.buf1.WriteByte('\n')
 			}
@@ -676,7 +687,8 @@ func html_add_context_lines(outfmt *OutputFormat, data1, data2 [][]byte, line1, 
 			outfmt.buf1.WriteString("</span>")
 
 			outfmt.buf2.WriteString("<span class=\"nop\">")
-			for _, line := range data2[outfmt.line2_end:end2] {
+			for lineno, line := range data2[outfmt.line2_end:end2] {
+				write_html_lineno(&outfmt.buf2, outfmt.line2_end+lineno+1, outfmt.lineno_width)
 				write_html_bytes(&outfmt.buf2, line)
 				outfmt.buf2.WriteByte('\n')
 			}
@@ -707,7 +719,8 @@ func html_add_context_lines(outfmt *OutputFormat, data1, data2 [][]byte, line1, 
 
 	if line1 > outfmt.line1_end {
 		outfmt.buf1.WriteString("<span class=\"nop\">")
-		for _, line := range data1[outfmt.line1_end:line1] {
+		for lineno, line := range data1[outfmt.line1_end:line1] {
+			write_html_lineno(&outfmt.buf1, outfmt.line1_end+lineno+1, outfmt.lineno_width)
 			write_html_bytes(&outfmt.buf1, line)
 			outfmt.buf1.WriteByte('\n')
 		}
@@ -717,7 +730,8 @@ func html_add_context_lines(outfmt *OutputFormat, data1, data2 [][]byte, line1, 
 
 	if line2 > outfmt.line2_end {
 		outfmt.buf2.WriteString("<span class=\"nop\">")
-		for _, line := range data2[outfmt.line2_end:line2] {
+		for lineno, line := range data2[outfmt.line2_end:line2] {
+			write_html_lineno(&outfmt.buf2, outfmt.line2_end+lineno+1, outfmt.lineno_width)
 			write_html_bytes(&outfmt.buf2, line)
 			outfmt.buf2.WriteByte('\n')
 		}
@@ -731,11 +745,17 @@ func (chg *DiffChangeFileHtml) diff_same(start1, end1, start2, end2 int) {
 
 func (chg *DiffChangeFileHtml) diff_insert(start1, end1, start2, end2 int) {
 	html_add_context_lines(chg.outfmt, chg.file1, chg.file2, start1, start2)
+	chg.outfmt.buf1.WriteString("<span class=\"nop\">")
 	chg.outfmt.buf2.WriteString("<span class=\"add\">")
-	for _, line := range chg.file2[start2:end2] {
+	for lineno, line := range chg.file2[start2:end2] {
+		write_html_lineno(&chg.outfmt.buf2, lineno+start2+1, chg.outfmt.lineno_width)
 		write_html_bytes(&chg.outfmt.buf2, line)
 		chg.outfmt.buf2.WriteByte('\n')
+
+		write_html_lineno(&chg.outfmt.buf1, 0, chg.outfmt.lineno_width)
+		chg.outfmt.buf1.WriteByte('\n')
 	}
+	chg.outfmt.buf1.WriteString("</span>")
 	chg.outfmt.buf2.WriteString("</span>")
 	chg.outfmt.line2_end = end2
 }
@@ -743,11 +763,17 @@ func (chg *DiffChangeFileHtml) diff_insert(start1, end1, start2, end2 int) {
 func (chg *DiffChangeFileHtml) diff_remove(start1, end1, start2, end2 int) {
 	html_add_context_lines(chg.outfmt, chg.file1, chg.file2, start1, start2)
 	chg.outfmt.buf1.WriteString("<span class=\"del\">")
-	for _, line := range chg.file1[start1:end1] {
+	chg.outfmt.buf2.WriteString("<span class=\"nop\">")
+	for lineno, line := range chg.file1[start1:end1] {
+		write_html_lineno(&chg.outfmt.buf1, lineno+start1+1, chg.outfmt.lineno_width)
 		write_html_bytes(&chg.outfmt.buf1, line)
 		chg.outfmt.buf1.WriteByte('\n')
+
+		write_html_lineno(&chg.outfmt.buf2, 0, chg.outfmt.lineno_width)
+		chg.outfmt.buf2.WriteByte('\n')
 	}
 	chg.outfmt.buf1.WriteString("</span>")
+	chg.outfmt.buf2.WriteString("</span>")
 	chg.outfmt.line1_end = end1
 }
 
@@ -760,6 +786,9 @@ func (chg *DiffChangeFileHtml) diff_modify(start1, end1, start2, end2 int) {
 	outfmt.buf2.WriteString("<span class=\"upd\">")
 
 	for start1 < end1 && start2 < end2 {
+
+		write_html_lineno(&outfmt.buf1, start1+1, outfmt.lineno_width)
+		write_html_lineno(&outfmt.buf2, start2+1, outfmt.lineno_width)
 
 		if flag_suppress_line_changes {
 			write_html_bytes(&outfmt.buf1, data1[start1])
@@ -802,20 +831,32 @@ func (chg *DiffChangeFileHtml) diff_modify(start1, end1, start2, end2 int) {
 
 	if start1 < end1 {
 		outfmt.buf1.WriteString("<span class=\"del\">")
-		for _, line := range data1[start1:end1] {
+		outfmt.buf2.WriteString("<span class=\"nop\">")
+		for lineno, line := range data1[start1:end1] {
+			write_html_lineno(&chg.outfmt.buf1, lineno+start1+1, chg.outfmt.lineno_width)
 			write_html_bytes(&outfmt.buf1, line)
 			outfmt.buf1.WriteByte('\n')
+
+			write_html_lineno(&chg.outfmt.buf2, 0, chg.outfmt.lineno_width)
+			outfmt.buf2.WriteByte('\n')
 		}
 		outfmt.buf1.WriteString("</span>")
+		outfmt.buf2.WriteString("</span>")
 		outfmt.line1_end = end1
 	}
 
 	if start2 < end2 {
+		outfmt.buf1.WriteString("<span class=\"nop\">")
 		outfmt.buf2.WriteString("<span class=\"add\">")
-		for _, line := range data2[start2:end2] {
+		for lineno, line := range data2[start2:end2] {
+			write_html_lineno(&chg.outfmt.buf2, lineno+start2+1, chg.outfmt.lineno_width)
 			write_html_bytes(&outfmt.buf2, line)
 			outfmt.buf2.WriteByte('\n')
+
+			write_html_lineno(&chg.outfmt.buf1, 0, chg.outfmt.lineno_width)
+			outfmt.buf1.WriteByte('\n')
 		}
+		outfmt.buf1.WriteString("</span>")
 		outfmt.buf2.WriteString("</span>")
 		outfmt.line2_end = end2
 	}
@@ -1827,6 +1868,12 @@ func diff_file(filename1, filename2 string, finfo1, finfo2 os.FileInfo) {
 			fileinfo1: finfo1,
 			fileinfo2: finfo2,
 		}
+
+		mlines := len(lines1)
+		if mlines < len(lines2) {
+			mlines = len(lines2)
+		}
+		outfmt.lineno_width = len(fmt.Sprintf("%d", mlines+1))
 
 		var chg DiffChanger
 

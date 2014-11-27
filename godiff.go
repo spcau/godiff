@@ -45,10 +45,13 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/bzip2"
+	"compress/gzip"
 	"flag"
 	"fmt"
 	"hash/crc32"
 	"html"
+	"io/ioutil"
 	"os"
 	"regexp"
 	"runtime"
@@ -1639,7 +1642,34 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 		return file
 	}
 
-	if fsize > MMAP_THRESHOLD {
+	if strings.HasSuffix(fname, ".gz") {
+		// Uncompress .gz file
+		reader, err := gzip.NewReader(file.osfile)
+		if err != nil {
+			file.errormsg = err.Error()
+			return file
+		}
+		fdata, err := ioutil.ReadAll(reader)
+		if err != nil {
+			file.errormsg = err.Error()
+			return file
+		}
+		reader.Close()
+		file.data = fdata
+		file.osfile.Close()
+		file.osfile = nil
+	} else if strings.HasSuffix(fname, ".bz2") {
+		// Uncompress .bz2 file
+		reader := bzip2.NewReader(file.osfile)
+		fdata, err := ioutil.ReadAll(reader)
+		if err != nil {
+			file.errormsg = err.Error()
+			return file
+		}
+		file.data = fdata
+		file.osfile.Close()
+		file.osfile = nil
+	} else if fsize > MMAP_THRESHOLD {
 		// map to file into memory, leave file open.
 		file.data, err = map_file(file.osfile, 0, int(fsize))
 		if err != nil {

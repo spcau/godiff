@@ -438,85 +438,94 @@ func next_change_segment(start int, change []bool, data []int) (int, int, int) {
 }
 
 //
+// Add segment to the group of changes. Add context lines before and after if necessary
+//
+func add_change_segment(chg DiffChanger, ops []DiffOp, op DiffOp) []DiffOp {
+	last1, last2 := 0, 0
+	if len(ops) > 0 {
+		last_op := ops[len(ops)-1]
+		last1, last2 = last_op.end1, last_op.end2
+	}
+
+	gap1, gap2 := op.start1-last1, op.start2-last2
+	if len(ops) > 0 && (op.op == 0 || (gap1 > flag_context_lines*2 && gap2 > flag_context_lines*2)) {
+		e1, e2 := min_int(op.start1, last1 + flag_context_lines), min_int(op.start2, last2 + flag_context_lines)
+		if e1 > last1 || e2 > last2 {
+			ops = append(ops, DiffOp{DIFF_OP_SAME, last1, e1, last2, e2})
+		}
+		chg.diff_lines(ops)
+		ops = ops[:0]
+	}
+
+	c1, c2 := max_int(last1, op.start1 - flag_context_lines), max_int(last2, op.start2 - flag_context_lines)
+	if c1 < op.start1 || c2 < op.start2 {
+		ops = append(ops, DiffOp{DIFF_OP_SAME, c1, op.start1, c2, op.start2})
+	}
+
+	if op.op != 0 {
+		ops = append(ops, op)
+	}
+	return ops
+}
+
+//
 // Report diff changes.
-// For each group of change, call the diff_lines function
+// For each group of change, call the diff_lines() function
 //
 func report_diff(chg DiffChanger, data1, data2 []int, change1, change2 []bool) bool {
 	len1, len2 := len(change1), len(change2)
 	i1, i2 := 0, 0
 	ops := make([]DiffOp, 0, 16)
-	ops_changed := false
 	changed := false
+	var m1start, m1end, m2start, m2end int
 
 	// scan for changes
 	for i1 < len1 || i2 < len2 {
 		switch {
 		// no change, advance both i1 and i2 to to next set of changes
 		case i1 < len1 && i2 < len2 && !change1[i1] && !change2[i2]:
-			s1, s2 := i1+1, i2+1
-			for s1 < len1 && s2 < len2 && !change1[s1] && !change2[s2] {
-				s1, s2 = s1+1, s2+1
-			}
-			if s1-i1 > flag_context_lines+flag_context_lines {
-				ops = append(ops, DiffOp{DIFF_OP_SAME, i1, min_int(s1, i1+flag_context_lines), i2, min_int(s2, i2+flag_context_lines)})
-				if ops_changed {
-					chg.diff_lines(ops)
-					changed = true
-				}
-				ops = ops[:0]
-				ops_changed = false
-				i1, i2 = max_int(i1, s1-flag_context_lines), max_int(i2, s2-flag_context_lines)
-			}
-			ops = append(ops, DiffOp{DIFF_OP_SAME, i1, s1, i2, s2})
-			i1, i2 = s1, s2
+			i1++
+			i2++
 
 		// change in both lists
 		case i1 < len1 && i2 < len2 && change1[i1] && change2[i2]:
-			newi1, m1start, m1end := next_change_segment(i1, change1, data1)
-			newi2, m2start, m2end := next_change_segment(i2, change2, data2)
+			i1, m1start, m1end = next_change_segment(i1, change1, data1)
+			i2, m2start, m2end = next_change_segment(i2, change2, data2)
 
-			if i1 < m1start || i2 < m2start {
-				ops = append(ops, DiffOp{DIFF_OP_SAME, i1, m1start, i2, m2start})
+			op_mode := 0
+			switch {
+			case m1start < m1end && m2start < m2end:
+				op_mode = DIFF_OP_MODIFY
+			case m1start < m1end:
+				op_mode = DIFF_OP_REMOVE
+			case m2start < m2end:
+				op_mode = DIFF_OP_INSERT
 			}
-
-			if m1start < m1end && m2start < m2end {
-				ops = append(ops, DiffOp{DIFF_OP_MODIFY, m1start, m1end, m2start, m2end})
-				ops_changed = true
-			} else if m1start < m1end {
-				ops = append(ops, DiffOp{DIFF_OP_REMOVE, m1start, m1end, m2start, m2end})
-				ops_changed = true
-			} else if m2start < m2end {
-				ops = append(ops, DiffOp{DIFF_OP_INSERT, m1start, m1end, m2start, m2end})
-				ops_changed = true
-			}
-			i1, i2 = newi1, newi2
-			if m1end < i1 || m2end < i2 {
-				ops = append(ops, DiffOp{DIFF_OP_SAME, m1end, i1, m2end, i2})
+			if op_mode != 0 {
+				ops = add_change_segment(chg, ops, DiffOp{op_mode, m1start, m1end, m2start, m2end})
+				changed = true
 			}
 
 		case i1 < len1 && change1[i1]:
-			newi1, m1start, m1end := next_change_segment(i1, change1, data1)
+			i1, m1start, m1end = next_change_segment(i1, change1, data1)
 			if m1start < m1end {
-				ops = append(ops, DiffOp{DIFF_OP_REMOVE, m1start, m1end, i2, i2})
-				ops_changed = true
+				ops = add_change_segment(chg, ops, DiffOp{DIFF_OP_REMOVE, m1start, m1end, i2, i2})
+				changed = true
 			}
-			i1 = newi1
 
 		case i2 < len2 && change2[i2]:
-			newi2, m2start, m2end := next_change_segment(i2, change2, data2)
+			i2, m2start, m2end = next_change_segment(i2, change2, data2)
 			if m2start < m2end {
-				ops = append(ops, DiffOp{DIFF_OP_INSERT, i1, i1, m2start, m2end})
-				ops_changed = true
+				ops = add_change_segment(chg, ops, DiffOp{DIFF_OP_INSERT, i1, i1, m2start, m2end})
+				changed = true
 			}
-			i2 = newi2
 
 		default: // should not reach here
 			return true
 		}
 	}
-	if len(ops) > 0 && ops_changed {
-		chg.diff_lines(ops)
-		changed = true
+	if len(ops) > 0 {
+		add_change_segment(chg, ops, DiffOp{0, len1, len1, len2, len2})
 	}
 	return changed
 }
@@ -685,7 +694,7 @@ func write_html_lineno(buf *bytes.Buffer, lineno, width int) {
 	}
 }
 
-func write_html_lineno_unified(buf *bytes.Buffer, lineno1, lineno2, width int) {
+func write_html_lineno_unified(buf *bytes.Buffer, mode string, lineno1, lineno2, width int) {
 	buf.WriteString("<span class=\"lno\">")
 
 	if lineno1 > 0 {
@@ -695,11 +704,12 @@ func write_html_lineno_unified(buf *bytes.Buffer, lineno1, lineno2, width int) {
 	}
 
 	if lineno2 > 0 {
-		fmt.Fprintf(buf, " %-*d", width, lineno2)
+		fmt.Fprintf(buf, " %-*d ", width, lineno2)
 	} else {
-		fmt.Fprintf(buf, " %-*s", width, "")
+		fmt.Fprintf(buf, " %-*s ", width, "")
 	}
 
+	buf.WriteString(mode)
 	buf.WriteString(" </span>")
 }
 
@@ -716,7 +726,7 @@ func write_html_lines(buf *bytes.Buffer, class string, lines [][]byte, lineno, l
 	buf.WriteString("</span>")
 }
 
-func write_html_lines_unified(buf *bytes.Buffer, class string, lines [][]byte, start1, start2, lineno_width int) {
+func write_html_lines_unified(buf *bytes.Buffer, class string, mode string, lines [][]byte, start1, start2, lineno_width int) {
 	buf.WriteString("<span class=\"")
 	buf.WriteString(class)
 	buf.WriteString("\">")
@@ -727,7 +737,7 @@ func write_html_lines_unified(buf *bytes.Buffer, class string, lines [][]byte, s
 		if start2 >= 0 {
 			start2++
 		}
-		write_html_lineno_unified(buf, start1, start2, lineno_width)
+		write_html_lineno_unified(buf, mode, start1, start2, lineno_width)
 		write_html_bytes(buf, line)
 		buf.WriteByte('\n')
 	}
@@ -814,17 +824,17 @@ func (chg *DiffChangerUnifiedHtml) diff_lines(ops []DiffOp) {
 	for _, v := range ops {
 		switch v.op {
 		case DIFF_OP_INSERT:
-			write_html_lines_unified(&chg.buf1, "add", chg.file2[v.start2:v.end2], -1, v.start2, chg.lineno_width)
+			write_html_lines_unified(&chg.buf1, "add", "+", chg.file2[v.start2:v.end2], -1, v.start2, chg.lineno_width)
 
 		case DIFF_OP_REMOVE:
-			write_html_lines_unified(&chg.buf1, "del", chg.file1[v.start1:v.end1], v.start1, -1, chg.lineno_width)
+			write_html_lines_unified(&chg.buf1, "del", "-", chg.file1[v.start1:v.end1], v.start1, -1, chg.lineno_width)
 
 		case DIFF_OP_MODIFY:
-			write_html_lines_unified(&chg.buf1, "del", chg.file1[v.start1:v.end1], v.start1, -1, chg.lineno_width)
-			write_html_lines_unified(&chg.buf1, "add", chg.file2[v.start2:v.end2], -1, v.start2, chg.lineno_width)
+			write_html_lines_unified(&chg.buf1, "del", "-", chg.file1[v.start1:v.end1], v.start1, -1, chg.lineno_width)
+			write_html_lines_unified(&chg.buf1, "add", "+", chg.file2[v.start2:v.end2], -1, v.start2, chg.lineno_width)
 
 		default:
-			write_html_lines_unified(&chg.buf1, "nop", chg.file1[v.start1:v.end1], v.start1, v.start2, chg.lineno_width)
+			write_html_lines_unified(&chg.buf1, "nop", " ", chg.file1[v.start1:v.end1], v.start1, v.start2, chg.lineno_width)
 		}
 	}
 

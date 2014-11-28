@@ -449,7 +449,7 @@ func add_change_segment(chg DiffChanger, ops []DiffOp, op DiffOp) []DiffOp {
 
 	gap1, gap2 := op.start1-last1, op.start2-last2
 	if len(ops) > 0 && (op.op == 0 || (gap1 > flag_context_lines*2 && gap2 > flag_context_lines*2)) {
-		e1, e2 := min_int(op.start1, last1 + flag_context_lines), min_int(op.start2, last2 + flag_context_lines)
+		e1, e2 := min_int(op.start1, last1+flag_context_lines), min_int(op.start2, last2+flag_context_lines)
 		if e1 > last1 || e2 > last2 {
 			ops = append(ops, DiffOp{DIFF_OP_SAME, last1, e1, last2, e2})
 		}
@@ -457,7 +457,7 @@ func add_change_segment(chg DiffChanger, ops []DiffOp, op DiffOp) []DiffOp {
 		ops = ops[:0]
 	}
 
-	c1, c2 := max_int(last1, op.start1 - flag_context_lines), max_int(last2, op.start2 - flag_context_lines)
+	c1, c2 := max_int(last1, op.start1-flag_context_lines), max_int(last2, op.start2-flag_context_lines)
 	if c1 < op.start1 || c2 < op.start2 {
 		ops = append(ops, DiffOp{DIFF_OP_SAME, c1, op.start1, c2, op.start2})
 	}
@@ -583,32 +583,27 @@ func split_runes(s []byte) ([]int, []int) {
 // replace special chars with html-entities
 //
 func write_html_bytes(buf *bytes.Buffer, line []byte) {
-
-	esc := ""
+	var esc string
 	lasti := 0
-
 	for i, v := range line {
-
-		// hopefully this this faster than using swtch/case
-		if v == '<' {
+		switch v {
+		case '<':
 			esc = html_entity_lt
-		} else if v == '>' {
+		case '>':
 			esc = html_entity_gt
-		} else if v == '&' {
+		case '&':
 			esc = html_entity_amp
-		} else if v == '\'' {
+		case '\'':
 			esc = html_entity_squote
-		} else if v == '"' {
+		case '"':
 			esc = html_entity_dquote
-		} else {
+		default:
 			continue
 		}
-
 		buf.Write(line[lasti:i])
 		buf.WriteString(esc)
 		lasti = i + 1
 	}
-
 	buf.Write(line[lasti:])
 }
 

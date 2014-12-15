@@ -16,7 +16,7 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-// +build !windows
+// +build linux freebsd darwin
 
 package main
 

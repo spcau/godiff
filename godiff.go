@@ -66,7 +66,7 @@ import (
 
 const (
 	// Version number
-	VERSION = "0.4"
+	VERSION = "0.5"
 
 	// Scan at up to this size in file for '\0' in test for binary file
 	BINARY_CHECK_SIZE = 65536
@@ -1674,7 +1674,7 @@ func open_file(fname string, finfo os.FileInfo) *Filedata {
 		file.data = fdata
 		file.osfile.Close()
 		file.osfile = nil
-	} else if fsize > MMAP_THRESHOLD {
+	} else if has_mmap && fsize > MMAP_THRESHOLD {
 		// map to file into memory, leave file open.
 		file.data, err = map_file(file.osfile, 0, int(fsize))
 		if err != nil {

@@ -25,6 +25,8 @@ import (
 	"unsafe"
 )
 
+const has_mmap = true
+
 var win_mapper_mutex sync.Mutex
 var win_mapper_handle = make(map[uintptr]syscall.Handle)
 
